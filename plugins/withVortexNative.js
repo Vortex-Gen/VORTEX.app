@@ -719,6 +719,7 @@ class VortexQuickTileService : TileService() {
 
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -727,12 +728,117 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
-import com.facebook.react.bridge.ReactMethod
+com.facebook.react.bridge.ReactMethod
 
 class VortexBridgeModule(private val reactCtx: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactCtx) {
 
     override fun getName(): String = "VortexBridge"
+
+    @ReactMethod
+    fun getInstalledApps(promise: Promise) {
+        try {
+            val pm = reactCtx.packageManager
+            val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+            }
+            val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.queryIntentActivities(mainIntent, PackageManager.ResolveInfoFlags.of(0L))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.queryIntentActivities(mainIntent, 0)
+            }
+
+            val arr = Arguments.createArray()
+            val seenPkgs = HashSet<String>()
+            for (ri in resolveInfos) {
+                val pkg = ri.activityInfo?.packageName ?: continue
+                if (!seenPkgs.add(pkg)) continue
+                val label = ri.loadLabel(pm)?.toString()?.trim() ?: pkg
+                val item = Arguments.createMap().apply {
+                    putString("label", label)
+                    putString("packageName", pkg)
+                }
+                arr.pushMap(item)
+            }
+            promise.resolve(arr)
+        } catch (e: Exception) {
+            promise.reject("APPS_LIST_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun openAppByName(rawQuery: String, promise: Promise) {
+        try {
+            val query = rawQuery.trim().lowercase()
+            if (query.isEmpty()) {
+                promise.resolve("")
+                return
+            }
+
+            val pm = reactCtx.packageManager
+
+            // Direct package name match if user passed com.xxx.yyy
+            if (query.contains(".")) {
+                val directIntent = pm.getLaunchIntentForPackage(rawQuery.trim())
+                if (directIntent != null) {
+                    directIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    reactCtx.startActivity(directIntent)
+                    promise.resolve(rawQuery.trim())
+                    return
+                }
+            }
+
+            val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+            }
+            val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.queryIntentActivities(mainIntent, PackageManager.ResolveInfoFlags.of(0L))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.queryIntentActivities(mainIntent, 0)
+            }
+
+            var bestPkg: String? = null
+            var bestLabel: String? = null
+            var bestScore = -1
+
+            for (ri in resolveInfos) {
+                val pkg = ri.activityInfo?.packageName ?: continue
+                val label = ri.loadLabel(pm)?.toString()?.trim() ?: continue
+                val lLower = label.lowercase()
+                val pLower = pkg.lowercase()
+
+                val score = when {
+                    lLower == query -> 100
+                    lLower.startsWith(query) -> 85
+                    lLower.contains(query) -> 70
+                    pLower.contains(query) -> 55
+                    else -> -1
+                }
+
+                if (score > bestScore) {
+                    bestScore = score
+                    bestPkg = pkg
+                    bestLabel = label
+                }
+            }
+
+            if (bestPkg != null) {
+                val launchIntent = pm.getLaunchIntentForPackage(bestPkg)
+                if (launchIntent != null) {
+                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    reactCtx.startActivity(launchIntent)
+                    promise.resolve("$bestLabel ($bestPkg)")
+                    return
+                }
+            }
+
+            promise.resolve("")
+        } catch (e: Exception) {
+            promise.reject("OPEN_APP_ERROR", e.message, e)
+        }
+    }
 
     @ReactMethod
     fun startFloatingOrb(idleAlpha: Double, promise: Promise) {
