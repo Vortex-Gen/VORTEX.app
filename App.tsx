@@ -40,12 +40,10 @@ export default function App() {
   const [telemetry, setTelemetry] = useState({ battery: 100, freeGB: '10.0' });
   const [lastAction, setLastAction] = useState<string>('OS Neural Link Ready');
 
-  // Vault state
   const [geminiInput, setGeminiInput] = useState('');
   const [elevenInput, setElevenInput] = useState('');
   const [keys, setKeys] = useState<KeyStats[]>([]);
 
-  // Project & PC Bridge state
   const [newProjName, setNewProjName] = useState('');
   const [brainMode, setBrainMode] = useState<'cloud' | 'pc_bridge'>('cloud');
   const [pcUrl, setPcUrl] = useState('http://192.168.1.100:8080/v1/chat/completions');
@@ -55,42 +53,55 @@ export default function App() {
   }, []);
 
   async function bootstrap() {
-    await initVortexDB();
-    await requestAllCorePermissions();
-    const projs = await getProjects();
-    setProjects(projs);
-    const savedMode = (await getSetting('brain_mode', 'cloud')) as 'cloud' | 'pc_bridge';
-    const savedUrl = await getSetting('pc_url', 'http://192.168.1.100:8080/v1/chat/completions');
-    setBrainMode(savedMode);
-    setPcUrl(savedUrl);
-    await refreshTelemetry();
-    await loadChat('vortex-core');
-    await refreshKeys();
+    try {
+      await initVortexDB();
+      const projs = await getProjects();
+      setProjects(projs);
+      const savedMode = (await getSetting('brain_mode', 'cloud')) as 'cloud' | 'pc_bridge';
+      const savedUrl = await getSetting('pc_url', 'http://192.168.1.100:8080/v1/chat/completions');
+      setBrainMode(savedMode);
+      setPcUrl(savedUrl);
+      await loadChat('vortex-core');
+      await refreshKeys();
+      await refreshTelemetry();
+    } catch (err: any) {
+      setLastAction(`Init notice: ${err?.message || 'Ready'}`);
+    }
+
+    try {
+      await requestAllCorePermissions();
+    } catch {}
   }
 
   async function refreshTelemetry() {
-    const info = await getDeviceTelemetry();
-    setTelemetry(info);
-    if (info.battery <= 20) {
-      const msg = `Alert bro, battery sirf ${info.battery}% bachi hai.`;
-      setLastAction(msg);
-      speakVortex(msg, true);
-    } else if (parseFloat(info.freeGB) < 2.0) {
-      const msg = `Warning bro, storage low hai, sirf ${info.freeGB} GB free hai.`;
-      setLastAction(msg);
-      speakVortex(msg, true);
-    }
+    try {
+      const info = await getDeviceTelemetry();
+      setTelemetry(info);
+      if (info.battery <= 20) {
+        const msg = `Alert bro, battery sirf ${info.battery}% bachi hai.`;
+        setLastAction(msg);
+        speakVortex(msg, true);
+      } else if (parseFloat(info.freeGB) > 0 && parseFloat(info.freeGB) < 2.0) {
+        const msg = `Warning bro, storage low hai, sirf ${info.freeGB} GB free hai.`;
+        setLastAction(msg);
+        speakVortex(msg, true);
+      }
+    } catch {}
   }
 
   async function loadChat(projId: string) {
-    setActiveProject(projId);
-    const hist = await getMemories(projId, 30);
-    setMessages(hist);
+    try {
+      setActiveProject(projId);
+      const hist = await getMemories(projId, 30);
+      setMessages(hist);
+    } catch {}
   }
 
   async function refreshKeys() {
-    const list = await getAllKeyStats();
-    setKeys(list);
+    try {
+      const list = await getAllKeyStats();
+      setKeys(list);
+    } catch {}
   }
 
   async function handleSend(customPrompt?: string) {
@@ -105,35 +116,42 @@ export default function App() {
       if (res.actionLog) setLastAction(`⚡ ${res.actionLog}`);
       await loadChat(activeProject);
       await refreshKeys();
+      await refreshTelemetry();
     } catch (e: any) {
-      Alert.alert('VORTEX Error', e?.message || 'Command failed');
+      Alert.alert('VORTEX Alert', e?.message || 'Command execute nahi ho paya');
     } finally {
       setLoading(false);
     }
   }
 
   async function handleSaveKeys() {
-    let added = 0;
-    if (geminiInput.trim()) {
-      added += await addBulkKeys('gemini', geminiInput);
-      setGeminiInput('');
+    try {
+      let added = 0;
+      if (geminiInput.trim()) {
+        added += await addBulkKeys('gemini', geminiInput);
+        setGeminiInput('');
+      }
+      if (elevenInput.trim()) {
+        added += await addBulkKeys('elevenlabs', elevenInput);
+        setElevenInput('');
+      }
+      await refreshKeys();
+      Alert.alert('Vault Updated', `${added} nayi API keys secure vault mein save ho gayi hain.`);
+    } catch (e: any) {
+      Alert.alert('Vault Error', e?.message || 'Keys save nahi ho payin');
     }
-    if (elevenInput.trim()) {
-      added += await addBulkKeys('elevenlabs', elevenInput);
-      setElevenInput('');
-    }
-    await refreshKeys();
-    Alert.alert('Vault Updated', `${added} nayi API keys secure vault mein save ho gayi hain.`);
   }
 
   async function handleCreateProject() {
     if (!newProjName.trim()) return;
-    const p = await createProject(newProjName);
-    setNewProjName('');
-    const list = await getProjects();
-    setProjects(list);
-    await loadChat(p.id);
-    setTab('hud');
+    try {
+      const p = await createProject(newProjName);
+      setNewProjName('');
+      const list = await getProjects();
+      setProjects(list);
+      await loadChat(p.id);
+      setTab('hud');
+    } catch {}
   }
 
   async function toggleBrainMode() {
@@ -150,7 +168,6 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
 
-      {/* Top Telemetry Bar */}
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>VORTEX // MOBILE OS</Text>
@@ -164,14 +181,12 @@ export default function App() {
         </View>
       </View>
 
-      {/* Live Action Status Strip */}
       <View style={styles.statusStrip}>
         <Text style={styles.statusText} numberOfLines={1}>
           {lastAction}
         </Text>
       </View>
 
-      {/* Navigation Tabs */}
       <View style={styles.tabRow}>
         {(['hud', 'vault', 'projects'] as const).map((t) => (
           <TouchableOpacity
@@ -186,14 +201,12 @@ export default function App() {
         ))}
       </View>
 
-      {/* TAB 1: COMMAND HUD */}
       {tab === 'hud' && (
         <View style={styles.body}>
-          {/* Quick OS Automation Chips */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
             {[
               { label: '📸 Reels', cmd: 'Instagram reels lagao' },
-              { label: '👻 Snap Streak', cmd: 'Snapchat kholo' },
+              { label: '👻 Snapchat', cmd: 'Snapchat kholo' },
               { label: '📞 Call Mom', cmd: 'Mom ko call karo' },
               { label: '💬 SMS Abbu', cmd: 'Abbu jaan ko I am coming message karo' },
               { label: '☀️ Bright 80%', cmd: 'brightness 80' },
@@ -212,7 +225,7 @@ export default function App() {
           <ScrollView style={styles.chatArea} contentContainerStyle={{ paddingBottom: 20 }}>
             {messages.length === 0 && (
               <Text style={styles.emptyText}>
-                VORTEX ready hai bro. Pehle "KEY VAULT" tab mein apni Gemini aur ElevenLabs keys paste karo, phir koi bhi command do!
+                VORTEX ready hai bro! Pehle "KEY VAULT" tab mein apni Gemini aur ElevenLabs keys paste karo, phir koi bhi command do.
               </Text>
             )}
             {messages.map((m, idx) => (
@@ -243,13 +256,12 @@ export default function App() {
         </View>
       )}
 
-      {/* TAB 2: 20-KEY ROTATION VAULT */}
       {tab === 'vault' && (
         <ScrollView style={styles.body}>
           <Text style={styles.sectionTitle}>
             Active Pool: {activeGeminiCount} Gemini | {activeElevenCount} ElevenLabs
           </Text>
-          <Text style={styles.label}>Paste Gemini API Keys (ek line mein ek key — 10 ya 20):</Text>
+          <Text style={styles.label}>Paste Gemini API Keys (ek line mein ek key):</Text>
           <TextInput
             style={styles.multiInput}
             multiline
@@ -286,7 +298,6 @@ export default function App() {
         </ScrollView>
       )}
 
-      {/* TAB 3: ISOLATED PROJECT MEMORIES & PC GEMMA-4 BRIDGE */}
       {tab === 'projects' && (
         <ScrollView style={styles.body}>
           <Text style={styles.sectionTitle}>Project Isolated Memory Pods</Text>
@@ -333,6 +344,15 @@ export default function App() {
 
           <TouchableOpacity
             style={[styles.primaryBtn, { backgroundColor: '#1E293B', marginTop: 12 }]}
+            onPress={() => requestAllCorePermissions()}
+          >
+            <Text style={[styles.primaryBtnText, { color: '#00F0FF' }]}>
+              GRANT CALL / CONTACTS / SMS PERMISSIONS
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.primaryBtn, { backgroundColor: '#1E293B', marginTop: 10 }]}
             onPress={() => executeOSAction({ type: 'system_settings', target: 'accessibility' })}
           >
             <Text style={[styles.primaryBtnText, { color: '#00F0FF' }]}>
