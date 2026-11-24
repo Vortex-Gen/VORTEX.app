@@ -6,10 +6,15 @@ import * as Brightness from 'expo-brightness';
 import * as Contacts from 'expo-contacts';
 import * as SMS from 'expo-sms';
 import * as IntentLauncher from 'expo-intent-launcher';
+import * as Haptics from 'expo-haptics';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { Audio } from 'expo-av';
-import { Linking, PermissionsAndroid, Platform } from 'react-native';
+import { Linking, NativeModules, PermissionsAndroid, Platform } from 'react-native';
 
 export type ProviderType = 'gemini' | 'elevenlabs';
+export type VortexModeType = 'autopilot' | 'architect' | 'offline';
+export type VoiceModeType = 'hybrid' | 'elevenlabs' | 'offline';
+export type VoiceProfileType = 'brian' | 'callum' | 'george';
 
 export interface ProjectItem {
   id: string;
@@ -32,12 +37,82 @@ export interface KeyStats {
   usage_count: number;
 }
 
+export interface MacroStep {
+  action:
+    | 'open_app'
+    | 'wait'
+    | 'tap_text'
+    | 'swipe'
+    | 'type_text'
+    | 'brightness'
+    | 'speak'
+    | 'back';
+  target?: string;
+  value?: number;
+  text?: string;
+}
+
+export interface VortexMacro {
+  id: string;
+  name: string;
+  phrase: string;
+  steps: MacroStep[];
+}
+
+export interface NativeServiceStatus {
+  overlayGranted: boolean;
+  orbRunning: boolean;
+  accessibilityEnabled: boolean;
+  notificationListenerEnabled: boolean;
+  activePackage: string;
+  lastNotification: string;
+}
+
+const VOICE_IDS: Record<VoiceProfileType, string> = {
+  brian: 'nPczCjzI2devNBz1zQrb',
+  callum: 'N2lVS1w4EtoT3dr4eOWO',
+  george: 'JBFqnCBsd6RMkjVDRZzb',
+};
+
+const DEFAULT_MACROS: VortexMacro[] = [
+  {
+    id: 'macro-snap-streak',
+    name: 'Snap Streak Flow',
+    phrase: 'snap streak bhejo',
+    steps: [
+      { action: 'open_app', target: 'snapchat' },
+      { action: 'wait', value: 2500 },
+      { action: 'speak', text: 'Snapchat open hai bro, streak capture aur send complete karo.' },
+    ],
+  },
+  {
+    id: 'macro-reels-next',
+    name: 'Reels Next Swipe',
+    phrase: 'agla reel',
+    steps: [
+      { action: 'swipe', target: 'up' },
+      { action: 'speak', text: 'Next reel.' },
+    ],
+  },
+  {
+    id: 'macro-stealth',
+    name: 'Night Stealth',
+    phrase: 'stealth mode',
+    steps: [
+      { action: 'brightness', value: 12 },
+      { action: 'speak', text: 'Night stealth active, brightness 12 percent.' },
+    ],
+  },
+];
+
 let db: SQLite.SQLiteDatabase | null = null;
 let currentSound: Audio.Sound | null = null;
 
+const VortexBridge = Platform.OS === 'android' ? NativeModules.VortexBridge : null;
+
 export async function initVortexDB(): Promise<SQLite.SQLiteDatabase> {
   if (db) return db;
-  db = await SQLite.openDatabaseAsync('vortex_os_v1.db');
+  db = await SQLite.openDatabaseAsync('vortex_beta_os.db');
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS projects (
@@ -67,16 +142,22 @@ export async function initVortexDB(): Promise<SQLite.SQLiteDatabase> {
     );
   `);
 
-  const existing = await db.getFirstAsync<{ id: string }>(
+  const existingProj = await db.getFirstAsync<{ id: string }>(
     'SELECT id FROM projects WHERE id = ?',
     ['vortex-core']
   );
-  if (!existing) {
+  if (!existingProj) {
     await db.runAsync(
       'INSERT INTO projects (id, name, description, created_at) VALUES (?, ?, ?, ?)',
-      ['vortex-core', 'VORTEX Core OS', 'Main Mobile Assistant & Device Automation', Date.now()]
+      ['vortex-core', 'Vortex ẞ Core', 'Autonomous Mobile OS & Automation', Date.now()]
     );
   }
+
+  const existingMacros = await getSetting('macros_json', '');
+  if (!existingMacros) {
+    await setSetting('macros_json', JSON.stringify(DEFAULT_MACROS));
+  }
+
   return db;
 }
 
@@ -127,13 +208,74 @@ export async function addMemory(
   );
 }
 
-export async function getMemories(projectId: string, limit = 25): Promise<MemoryMessage[]> {
+export async function getMemories(projectId: string, limit = 30): Promise<MemoryMessage[]> {
   const database = await initVortexDB();
   const rows = await database.getAllAsync<MemoryMessage>(
     'SELECT id, role, content, timestamp FROM memories WHERE project_id = ? ORDER BY timestamp DESC LIMIT ?',
     [projectId, limit]
   );
   return rows.reverse();
+}
+
+// --- MACROS ---
+export async function getMacros(): Promise<VortexMacro[]> {
+  const raw = await getSetting('macros_json', '');
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+  } catch {}
+  return DEFAULT_MACROS;
+}
+
+export async function saveMacro(macro: VortexMacro): Promise<VortexMacro[]> {
+  const current = await getMacros();
+  const filtered = current.filter((m) => m.id !== macro.id);
+  const updated = [macro, ...filtered];
+  await setSetting('macros_json', JSON.stringify(updated));
+  return updated;
+}
+
+export async function deleteMacro(id: string): Promise<VortexMacro[]> {
+  const current = await getMacros();
+  const updated = current.filter((m) => m.id !== id);
+  await setSetting('macros_json', JSON.stringify(updated));
+  return updated;
+}
+
+// --- BACKUP & RESTORE (JSON) ---
+export async function exportVaultAndMacrosBackup(): Promise<string> {
+  const database = await initVortexDB();
+  const keysRows = await database.getAllAsync<{
+    provider: ProviderType;
+    api_key: string;
+    usage_count: number;
+  }>('SELECT provider, api_key, usage_count FROM api_keys');
+  const macros = await getMacros();
+  const payload = {
+    app: 'Vortex ẞ',
+    exportedAt: new Date().toISOString(),
+    keys: keysRows,
+    macros,
+  };
+  const jsonStr = JSON.stringify(payload, null, 2);
+  Clipboard.setString(jsonStr);
+  return jsonStr;
+}
+
+export async function importVaultAndMacrosBackup(rawJson: string): Promise<number> {
+  const parsed = JSON.parse(rawJson);
+  let importedKeys = 0;
+  if (Array.isArray(parsed.keys)) {
+    for (const k of parsed.keys) {
+      if (k?.api_key && (k?.provider === 'gemini' || k?.provider === 'elevenlabs')) {
+        importedKeys += await addBulkKeys(k.provider, String(k.api_key));
+      }
+    }
+  }
+  if (Array.isArray(parsed.macros) && parsed.macros.length > 0) {
+    await setSetting('macros_json', JSON.stringify(parsed.macros));
+  }
+  return importedKeys;
 }
 
 // --- 20+ API KEY ROTATION VAULT ---
@@ -203,7 +345,7 @@ async function cooldownKey(id: number, mins = 60): Promise<void> {
   );
 }
 
-// --- DUAL VOICE ENGINE (ELEVENLABS + ANDROID OFFLINE TTS) ---
+// --- DUAL VOICE ENGINE ---
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -234,29 +376,28 @@ export async function speakVortex(text: string, forceOffline = false): Promise<v
     }
   } catch {}
 
-  const voiceMode = await getSetting('voice_mode', 'hybrid');
-  const shortAlert = cleanText.length < 45;
+  const voiceMode = (await getSetting('voice_mode', 'hybrid')) as VoiceModeType;
+  const voiceProfile = (await getSetting('voice_profile', 'brian')) as VoiceProfileType;
+  const voiceId = VOICE_IDS[voiceProfile] || VOICE_IDS.brian;
+  const shortAlert = cleanText.length < 42;
 
-  if (!forceOffline && voiceMode !== 'offline' && !shortAlert) {
-    for (let i = 0; i < 5; i++) {
+  if (!forceOffline && voiceMode !== 'offline' && !(voiceMode === 'hybrid' && shortAlert)) {
+    for (let i = 0; i < 4; i++) {
       const elKey = await getNextKey('elevenlabs');
       if (!elKey) break;
       try {
-        const res = await fetch(
-          'https://api.elevenlabs.io/v1/text-to-speech/nPczCjzI2devNBz1zQrb',
-          {
-            method: 'POST',
-            headers: {
-              'xi-api-key': elKey.key,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              text: cleanText.slice(0, 450),
-              model_id: 'eleven_multilingual_v2',
-              voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-            }),
-          }
-        );
+        const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+          method: 'POST',
+          headers: {
+            'xi-api-key': elKey.key,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            text: cleanText.slice(0, 450),
+            model_id: 'eleven_multilingual_v2',
+            voice_settings: { stability: 0.52, similarity_boost: 0.75 },
+          }),
+        });
 
         if (res.status === 401 || res.status === 429) {
           await cooldownKey(elKey.id, 720);
@@ -266,7 +407,7 @@ export async function speakVortex(text: string, forceOffline = false): Promise<v
         if (res.ok) {
           const buf = await res.arrayBuffer();
           const b64 = arrayBufferToBase64(buf);
-          const fileUri = `${FileSystem.cacheDirectory}vortex_voice.mp3`;
+          const fileUri = `${FileSystem.cacheDirectory}vortex_beta_voice.mp3`;
           await FileSystem.writeAsStringAsync(fileUri, b64, {
             encoding: FileSystem.EncodingType.Base64,
           });
@@ -284,7 +425,51 @@ export async function speakVortex(text: string, forceOffline = false): Promise<v
   Speech.speak(cleanText, { language: 'hi-IN', pitch: 0.98, rate: 1.03 });
 }
 
-// --- ANDROID OS AUTOMATION CONTROLLER ---
+// --- NATIVE BRIDGE & OS CONTROLLER ---
+export async function getNativeStatus(): Promise<NativeServiceStatus> {
+  if (VortexBridge && typeof VortexBridge.getServiceStatuses === 'function') {
+    try {
+      return await VortexBridge.getServiceStatuses();
+    } catch {}
+  }
+  return {
+    overlayGranted: false,
+    orbRunning: false,
+    accessibilityEnabled: false,
+    notificationListenerEnabled: false,
+    activePackage: '',
+    lastNotification: '',
+  };
+}
+
+export async function startFloatingOrb(idleAlpha = 0.1): Promise<string> {
+  if (VortexBridge && typeof VortexBridge.startFloatingOrb === 'function') {
+    return await VortexBridge.startFloatingOrb(idleAlpha);
+  }
+  return 'bridge_unavailable';
+}
+
+export async function stopFloatingOrb(): Promise<string> {
+  if (VortexBridge && typeof VortexBridge.stopFloatingOrb === 'function') {
+    return await VortexBridge.stopFloatingOrb();
+  }
+  return 'bridge_unavailable';
+}
+
+export async function openAccessibilitySettings(): Promise<void> {
+  if (VortexBridge && typeof VortexBridge.openAccessibilitySettings === 'function') {
+    await VortexBridge.openAccessibilitySettings();
+  } else if (Platform.OS === 'android') {
+    await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.ACCESSIBILITY_SETTINGS);
+  }
+}
+
+export async function openNotificationSettings(): Promise<void> {
+  if (VortexBridge && typeof VortexBridge.openNotificationSettings === 'function') {
+    await VortexBridge.openNotificationSettings();
+  }
+}
+
 export async function requestAllCorePermissions(): Promise<void> {
   if (Platform.OS === 'android') {
     await PermissionsAndroid.requestMultiple([
@@ -294,8 +479,12 @@ export async function requestAllCorePermissions(): Promise<void> {
       PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
     ]);
   }
-  await Contacts.requestPermissionsAsync();
-  await Brightness.requestPermissionsAsync();
+  try {
+    await Contacts.requestPermissionsAsync();
+  } catch {}
+  try {
+    await Brightness.requestPermissionsAsync();
+  } catch {}
 }
 
 export async function getDeviceTelemetry(): Promise<{ battery: number; freeGB: string }> {
@@ -330,42 +519,43 @@ async function findContactNumber(nameQuery: string): Promise<{ name: string; num
   return null;
 }
 
-const APP_SCHEMES: Record<string, { url: string; pkg: string }> = {
-  instagram: { url: 'instagram://app', pkg: 'com.instagram.android' },
-  reels: { url: 'instagram://reels_home', pkg: 'com.instagram.android' },
-  whatsapp: { url: 'whatsapp://send', pkg: 'com.whatsapp' },
-  snapchat: { url: 'snapchat://', pkg: 'com.snapchat.android' },
-  youtube: { url: 'vnd.youtube://', pkg: 'com.google.android.youtube' },
-  chrome: { url: 'googlechrome://', pkg: 'com.android.chrome' },
-  camera: { url: 'android.media.action.IMAGE_CAPTURE', pkg: '' },
-};
-
 export async function executeOSAction(action: {
   type: string;
   target?: string;
   message?: string;
   value?: number;
 }): Promise<string> {
+  try {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  } catch {}
+
   const type = (action.type || '').toLowerCase();
   const target = (action.target || '').trim();
 
   if (type === 'open_app') {
-    const key = target.toLowerCase();
-    const app = APP_SCHEMES[key];
-    if (app) {
+    const normalized = target.toLowerCase();
+    if (normalized === 'reels') {
       try {
-        await Linking.openURL(app.url);
-        return `Opened ${target}`;
-      } catch {
-        if (app.pkg && Platform.OS === 'android') {
-          await IntentLauncher.startActivityAsync('android.intent.action.MAIN', {
-            packageName: app.pkg,
-          });
-          return `Launched ${target}`;
-        }
-      }
+        await Linking.openURL('instagram://reels_home');
+        return 'Opened Instagram Reels';
+      } catch {}
     }
-    return `App ${target} launch requested`;
+
+    if (VortexBridge && typeof VortexBridge.openAppByName === 'function') {
+      try {
+        const launched = await VortexBridge.openAppByName(target);
+        if (launched) return `Opened ${launched}`;
+      } catch {}
+    }
+
+    if (VortexBridge && typeof VortexBridge.tapByText === 'function') {
+      try {
+        const tapped = await VortexBridge.tapByText(target);
+        if (tapped) return `Tapped app "${target}" on screen`;
+      } catch {}
+    }
+
+    return `App "${target}" not found`;
   }
 
   if (type === 'call') {
@@ -397,7 +587,7 @@ export async function executeOSAction(action: {
     await Linking.openURL(
       `whatsapp://send?phone=${num}&text=${encodeURIComponent(action.message || '')}`
     );
-    return `WhatsApp chat opened for ${contact ? contact.name : num}`;
+    return `WhatsApp opened for ${contact ? contact.name : num}`;
   }
 
   if (type === 'brightness') {
@@ -407,7 +597,29 @@ export async function executeOSAction(action: {
     } catch {
       await Brightness.setBrightnessAsync(level);
     }
-    return `Brightness set to ${Math.round(level * 100)}%`;
+    return `Brightness ${Math.round(level * 100)}%`;
+  }
+
+  if (type === 'swipe') {
+    const ok = VortexBridge?.swipeScreen ? await VortexBridge.swipeScreen(target || 'up') : false;
+    return ok ? `Swiped ${target || 'up'}` : 'Accessibility swipe unavailable';
+  }
+
+  if (type === 'tap_text') {
+    const ok = VortexBridge?.tapByText ? await VortexBridge.tapByText(target) : false;
+    return ok ? `Tapped "${target}"` : `Element "${target}" not found`;
+  }
+
+  if (type === 'type_text') {
+    const ok = VortexBridge?.typeText ? await VortexBridge.typeText(action.message || target) : false;
+    return ok ? 'Typed into focused field' : 'No focused input field';
+  }
+
+  if (type === 'read_screen') {
+    if (VortexBridge?.readScreenText) {
+      return await VortexBridge.readScreenText();
+    }
+    return 'Screen reader unavailable';
   }
 
   if (type === 'system_settings' && Platform.OS === 'android') {
@@ -428,48 +640,125 @@ export async function executeOSAction(action: {
   return 'Action processed';
 }
 
-// --- HYBRID BRAIN ROUTER (GEMINI 20-KEY POOL + FUTURE PC GEMMA 4 BRIDGE) ---
+export async function runMacro(macro: VortexMacro): Promise<string[]> {
+  const logs: string[] = [];
+  for (const step of macro.steps) {
+    if (step.action === 'wait') {
+      const ms = Math.min(8000, Math.max(200, step.value ?? 1000));
+      await new Promise((r) => setTimeout(r, ms));
+      logs.push(`Waited ${ms}ms`);
+    } else if (step.action === 'speak') {
+      if (step.text) {
+        await speakVortex(step.text, true);
+        logs.push(`Spoke: ${step.text}`);
+      }
+    } else if (step.action === 'open_app') {
+      logs.push(await executeOSAction({ type: 'open_app', target: step.target || '' }));
+    } else if (step.action === 'swipe') {
+      logs.push(await executeOSAction({ type: 'swipe', target: step.target || 'up' }));
+    } else if (step.action === 'tap_text') {
+      logs.push(await executeOSAction({ type: 'tap_text', target: step.target || '' }));
+    } else if (step.action === 'type_text') {
+      logs.push(await executeOSAction({ type: 'type_text', message: step.text || '' }));
+    } else if (step.action === 'brightness') {
+      logs.push(await executeOSAction({ type: 'brightness', value: step.value ?? 50 }));
+    } else if (step.action === 'back') {
+      const ok = VortexBridge?.pressBack ? await VortexBridge.pressBack() : false;
+      logs.push(ok ? 'Pressed Back' : 'Back unavailable');
+    }
+  }
+  return logs;
+}
+
+// --- VORTEX CORTEX BRAIN ---
 export async function runVortexCommand(
   projectId: string,
-  userText: string
-): Promise<{ reply: string; actionLog?: string }> {
-  await addMemory(projectId, 'user', userText);
-  const lower = userText.toLowerCase().trim();
+  rawUserText: string
+): Promise<{ reply: string; actionLogs: string[] }> {
+  const cleanedInput =
+    rawUserText.replace(/^\s*(hey\s+)?vortex[,:\s-]*/i, '').trim() || rawUserText.trim();
+  await addMemory(projectId, 'user', cleanedInput);
+  const lower = cleanedInput.toLowerCase();
+  const actionLogs: string[] = [];
 
-  // Fast Zero-Latency Offline Intent Check
-  if (lower.startsWith('open ') || lower.endsWith(' kholo')) {
-    const appName = lower.replace('open ', '').replace(' kholo', '').trim();
-    const log = await executeOSAction({ type: 'open_app', target: appName });
-    const reply = `Done bro, ${appName} open kar diya.`;
+  // 1. Check Custom Macros by phrase
+  const macros = await getMacros();
+  const matchedMacro = macros.find((m) => lower.includes(m.phrase.toLowerCase().trim()));
+  if (matchedMacro) {
+    const mLogs = await runMacro(matchedMacro);
+    actionLogs.push(...mLogs);
+    const reply = `Macro "${matchedMacro.name}" execute ho gaya.`;
     await addMemory(projectId, 'model', reply);
     await speakVortex(reply, true);
-    return { reply, actionLog: log };
+    return { reply, actionLogs };
+  }
+
+  // 2. Fast Zero-Latency Offline Shortcuts
+  if (lower === 'swipe up' || lower === 'up swipe' || lower === 'neeche swipe') {
+    const log = await executeOSAction({ type: 'swipe', target: 'up' });
+    actionLogs.push(log);
+    const reply = 'Screen swipe up kar diya.';
+    await addMemory(projectId, 'model', reply);
+    await speakVortex(reply, true);
+    return { reply, actionLogs };
+  }
+
+  if (lower.startsWith('tap ') || lower.startsWith('click ')) {
+    const btnTarget = cleanedInput.replace(/^(tap|click)\s+/i, '').trim();
+    const log = await executeOSAction({ type: 'tap_text', target: btnTarget });
+    actionLogs.push(log);
+    const reply = `${btnTarget} par tap attempt kiya.`;
+    await addMemory(projectId, 'model', reply);
+    await speakVortex(reply, true);
+    return { reply, actionLogs };
+  }
+
+  if (lower.startsWith('open ') || lower.endsWith(' kholo')) {
+    const appName = lower.replace(/^open\s+/i, '').replace(/\s+kholo$/i, '').trim();
+    const log = await executeOSAction({ type: 'open_app', target: appName });
+    actionLogs.push(log);
+    const reply = `${appName} open kar diya.`;
+    await addMemory(projectId, 'model', reply);
+    await speakVortex(reply, true);
+    return { reply, actionLogs };
   }
 
   const brightMatch = lower.match(/brightness\s*(\d+)/);
   if (brightMatch) {
     const val = parseInt(brightMatch[1], 10);
     const log = await executeOSAction({ type: 'brightness', value: val });
-    const reply = `Brightness ${val}% par set kar di hai.`;
+    actionLogs.push(log);
+    const reply = `Brightness ${val}% par set kar di.`;
     await addMemory(projectId, 'model', reply);
     await speakVortex(reply, true);
-    return { reply, actionLog: log };
+    return { reply, actionLogs };
+  }
+
+  const mode = (await getSetting('vortex_mode', 'autopilot')) as VortexModeType;
+  if (mode === 'offline') {
+    const reply =
+      'Offline mode active hai. "open <app>", "brightness <0-100>", "swipe up", ya koi macro phrase bolo.';
+    await addMemory(projectId, 'model', reply);
+    await speakVortex(reply, true);
+    return { reply, actionLogs };
+  }
+
+  let screenContext = '';
+  if (lower.includes('screen') || lower.includes('padho') || lower.includes('kya dikh')) {
+    screenContext = await executeOSAction({ type: 'read_screen' });
+    actionLogs.push('Read active screen nodes');
   }
 
   const brainMode = await getSetting('brain_mode', 'cloud');
   const pcUrl = await getSetting('pc_url', 'http://192.168.1.100:8080/v1/chat/completions');
-  const history = await getMemories(projectId, 12);
+  const history = await getMemories(projectId, 14);
 
-  const systemPrompt = `You are VORTEX, an advanced Android OS AI assistant built by SdaifnY.
-Reply naturally in concise Hinglish or English matching the user.
-If the user asks to perform an Android device action, append ONE action tag at the very end of your reply in this exact JSON format:
-[[ACTION:{"type":"call|sms|whatsapp|open_app|brightness|system_settings","target":"name_or_app","message":"text_if_any","value":80}]]
-Examples:
-- "Mom ko call karo" -> Calling Mom right now. [[ACTION:{"type":"call","target":"Mom"}]]
-- "Abbu jaan ko I am coming message karo" -> Abbu jaan ko SMS bhej raha hoon. [[ACTION:{"type":"sms","target":"Abbu jaan","message":"I am coming"}]]
-- "Instagram reels lagao" -> Instagram Reels open kar raha hoon. [[ACTION:{"type":"open_app","target":"reels"}]]
-- "Snapchat kholo" -> Snapchat open kar raha hoon. [[ACTION:{"type":"open_app","target":"snapchat"}]]
-- "Volume ya sound settings kholo" -> Sound settings open kar raha hoon. [[ACTION:{"type":"system_settings","target":"sound"}]]`;
+  const systemPrompt = `You are Vortex ẞ, an autonomous Android OS AI assistant.
+Current mode: ${mode}.
+${screenContext ? `Live Screen Context: ${screenContext}` : ''}
+Reply concisely in Hinglish or English matching the user.
+For any Android device actions needed, append one or more action tags at the end in exact JSON:
+[[ACTION:{"type":"call|sms|whatsapp|open_app|brightness|swipe|tap_text|type_text|system_settings","target":"name_or_app_or_dir","message":"text","value":80}]]`;
 
   let rawReply = '';
 
@@ -489,12 +778,12 @@ Examples:
       }),
     });
     const data = await res.json();
-    rawReply = data?.choices?.[0]?.message?.content || 'PC Gemma 4 node connect nahi ho paya.';
+    rawReply = data?.choices?.[0]?.message?.content || 'PC Gemma 4 node unreachable.';
   } else {
     for (let attempt = 0; attempt < 25; attempt++) {
       const keyObj = await getNextKey('gemini');
       if (!keyObj) {
-        rawReply = 'Saari Gemini API keys abhi cooldown par hain. Key Vault tab mein nayi keys add karo.';
+        rawReply = 'Saari Gemini API keys cooldown par hain. VAULT tab mein nayi keys add karo.';
         break;
       }
 
@@ -526,23 +815,24 @@ Examples:
           break;
         }
       } catch {
-        rawReply = 'Network error. Offline commands jaise "open instagram" ya "brightness 50" try karo.';
+        rawReply = 'Network error. Offline commands ya macros try karo.';
         break;
       }
     }
   }
 
-  let actionLog: string | undefined;
-  const actionMatch = rawReply.match(/\[\[ACTION:([\s\S]*?)\]\]/);
-  if (actionMatch) {
+  const regex = /\[\[ACTION:([\s\S]*?)\]\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(rawReply)) !== null) {
     try {
-      const parsed = JSON.parse(actionMatch[1]);
-      actionLog = await executeOSAction(parsed);
+      const parsed = JSON.parse(match[1]);
+      const log = await executeOSAction(parsed);
+      actionLogs.push(log);
     } catch {}
   }
 
   const cleanReply = rawReply.replace(/\[\[ACTION:[\s\S]*?\]\]/g, '').trim();
   await addMemory(projectId, 'model', cleanReply);
   await speakVortex(cleanReply);
-  return { reply: cleanReply, actionLog };
+  return { reply: cleanReply, actionLogs };
 }
