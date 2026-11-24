@@ -1,4 +1,4 @@
-name: Build VORTEX APK
+name: Build Vortex Beta APK
 
 on:
   workflow_dispatch:
@@ -6,8 +6,11 @@ on:
     paths:
       - 'App.tsx'
       - 'src/**'
+      - 'plugins/**'
+      - 'assets/**'
       - 'package.json'
       - 'app.json'
+      - '.github/workflows/build-apk.yml'
 
 jobs:
   build-android:
@@ -41,8 +44,8 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease
 
-      - name: Upload VORTEX APK
+      - name: Upload Vortex Beta APK
         uses: actions/upload-artifact@v4
         with:
-          name: VORTEX-Mobile-v1-Stable
+          name: Vortex-Beta-Release-APK
           path: android/app/build/outputs/apk/release/app-release.apk
