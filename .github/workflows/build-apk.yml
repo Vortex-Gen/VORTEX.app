@@ -5,6 +5,9 @@ on:
   push:
     paths:
       - 'App.tsx'
+      - 'src/**'
+      - 'package.json'
+      - 'app.json'
 
 jobs:
   build-android:
@@ -32,14 +35,14 @@ jobs:
       - name: Generate Native Android Project
         run: npx expo prebuild --platform android --no-install
 
-      - name: Build Debug APK
+      - name: Build Standalone Release APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleRelease
 
       - name: Upload VORTEX APK
         uses: actions/upload-artifact@v4
         with:
-          name: VORTEX-Mobile-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: VORTEX-Mobile-v1-Stable
+          path: android/app/build/outputs/apk/release/app-release.apk
