@@ -1,12 +1,14 @@
 {
-  "name": "vortex-mobile",
-  "version": "1.0.0",
+  "name": "vortex-beta-os",
+  "version": "2.0.0",
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android"
   },
   "dependencies": {
+    "@react-native-clipboard/clipboard": "^1.14.4",
+    "@react-native-voice/voice": "^3.2.4",
     "expo": "~52.0.0",
     "expo-av": "~15.0.1",
     "expo-background-fetch": "~13.0.2",
@@ -14,7 +16,9 @@
     "expo-brightness": "~13.0.2",
     "expo-contacts": "~14.0.2",
     "expo-file-system": "~18.0.4",
+    "expo-haptics": "~14.0.0",
     "expo-intent-launcher": "~12.0.2",
+    "expo-linear-gradient": "~14.0.2",
     "expo-notifications": "~0.29.11",
     "expo-sms": "~13.0.0",
     "expo-speech": "~13.0.0",
