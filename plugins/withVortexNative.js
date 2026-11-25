@@ -908,7 +908,10 @@ class VortexFloatingService : Service() {
                             if (spoken.isNotEmpty()) {
                                 val lower = spoken.lowercase()
                                 if (isActiveCommandMode || lower.contains("vortex")) {
-                                    val cleaned = spoken.replace(Regex("(?i)hey\\s+vortex|vortex"), "").trim()
+                                    val cleaned = spoken
+                                        .replace("hey vortex", "", ignoreCase = true)
+                                        .replace("vortex", "", ignoreCase = true)
+                                        .trim()
                                     if (cleaned.isEmpty()) {
                                         expandCapsule("VORTEX ẞ  ⊕  YES?", "Listening for command...")
                                         mainHandler.postDelayed({ startListeningLoop(true) }, 250L)
@@ -1519,13 +1522,14 @@ class VortexBridgeModule(private val reactCtx: ReactApplicationContext) :
         return false
     }
 
-    private fun isNotificationListenerEnabled(): Boolean {
-        val flat = ComponentName(reactCtx, VortexNotificationListener::class.java).flattenToString()
-        val names = Settings.Secure.getString(
-            reactCtx.contentResolver,
+      private fun isNotificationListenerEnabled(): Boolean {
+        val pkgName = reactApplicationContext.packageName
+        val flat = Settings.Secure.getString(
+            reactApplicationContext.contentResolver,
             "enabled_notification_listeners"
         ) ?: return false
-        return names.contains(flat, ignoreCase = true)
+        val target = "$pkgName/com.vortex.app.VortexNotificationListener"
+        return flat.contains(target)
     }
 }
 `
