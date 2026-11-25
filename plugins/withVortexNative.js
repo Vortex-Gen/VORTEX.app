@@ -1,9 +1,10 @@
 const {
   withAndroidManifest,
   withDangerousMod,
-  withMainApplication,
+  withGradleProperties,
   withMainApplication,
 } = require('expo/config-plugins');
+
 const fs = require('fs');
 const path = require('path');
 
