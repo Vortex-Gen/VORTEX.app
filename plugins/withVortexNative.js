@@ -62,15 +62,6 @@ function withVortexManifest(config) {
           },
         },
       ],
-    };
-    property: [
-        {
-          $: {
-            'android:name': 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE',
-            'android:value': 'Floating assistant orb overlay',
-          },
-        },
-      ],
     });
   
     app.service.push({
@@ -80,6 +71,15 @@ function withVortexManifest(config) {
         'android:exported': 'false',
         'android:foregroundServiceType': 'specialUse',
       },
+    };
+    property: [
+        {
+          $: {
+            'android:name': 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE',
+            'android:value': 'Floating assistant orb overlay',
+          },
+        },
+      ],
     });
 
     app.service.push({
