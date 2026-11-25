@@ -1113,7 +1113,7 @@ class VortexBridgeModule(private val reactCtx: ReactApplicationContext) :
 
       companion object {
       @Volatile
-      var reactCtx: ReactApplicationContext? = null
+      val reactCtx: ReactApplicationContext? = null
 
       fun emitJsEvent(eventName: String, payload: String) {
           try {
