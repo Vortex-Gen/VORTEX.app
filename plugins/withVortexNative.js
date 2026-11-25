@@ -698,12 +698,24 @@ class VortexQuickTileService : TileService() {
     override fun onClick() {
         super.onClick()
         if (!Settings.canDrawOverlays(this)) {
-            val intent = Intent(MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            startActivityAndCollapse(intent)
-            return
-        }
+          val intent = Intent(this, MainActivity::class.java).apply {
+              flags = Intent.FLAG_ACTIVITY_NEW_TASK
+          }
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+              val pi = android.app.PendingIntent.getActivity(
+                  this,
+                  1,
+                  intent,
+                  android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+              )
+              startActivityAndCollapse(pi)
+          } else {
+              @Suppress("DEPRECATION")
+              startActivityAndCollapse(intent)
+          }
+          return
+      }
+
 
         if (VortexFloatingService.isRunning) {
             val stopIntent = Intent(this, VortexFloatingService::class.java).apply {
@@ -1004,17 +1016,17 @@ class VortexBridgeModule(private val reactCtx: ReactApplicationContext) :
         promise.resolve(svc.typeIntoFocusedField(text))
     }
 
-    @ReactMethod
-    fun pressBack(promise: Promise) {
-        val svc = VortexAccessibilityService.instance
-        promise.resolve(svc?.pressGlobalBack() ?: false)
-    }
+      @ReactMethod
+  fun pressBack(promise: Promise) {
+      val svc = VortexAccessibilityService.instance
+      promise.resolve(svc?.pressGlobalBack() ?: false)
+  }
 
-    @ReactMethod
-    fun pressHome(promise: Promise) {
-        val svc = VortexAccessibilityService.instance
-        promise.resolve(svc?.pressGlobalHome() ?: false)
-    }
+  @ReactMethod
+  fun pressHome(promise: Promise) {
+      val svc = VortexAccessibilityService.instance
+      promise.resolve(svc?.pressGlobalHome() ?: false)
+  }
 
     private fun isAccessibilityServiceEnabled(): Boolean {
         val expected = ComponentName(reactCtx, VortexAccessibilityService::class.java).flattenToString()
