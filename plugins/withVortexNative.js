@@ -62,7 +62,7 @@ function withVortexManifest(config) {
           },
         },
       ],
-    });
+    };
     property: [
         {
           $: {
