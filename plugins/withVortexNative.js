@@ -1470,11 +1470,13 @@ class VortexBridgeModule(private val reactCtx: ReactApplicationContext) :
           val freeStorageGb = (stat.availableBlocksLong * stat.blockSizeLong) / (1024.0 * 1024.0 * 1024.0)
           val totalStorageGb = (stat.blockCountLong * stat.blockSizeLong) / (1024.0 * 1024.0 * 1024.0)
 
-          val json = "{\"freeRamMb\":" + freeRamMb +
-              ",\"totalRamMb\":" + totalRamMb +
-              ",\"freeStorageGb\":" + String.format("%.2f", freeStorageGb) +
-              ",\"totalStorageGb\":" + String.format("%.2f", totalStorageGb) + "}"
-          promise.resolve(json)
+            val obj = org.json.JSONObject()
+            obj.put("freeRamMb", freeRamMb)
+            obj.put("totalRamMb", totalRamMb)
+            obj.put("freeStorageGb", Math.round(freeStorageGb * 100.0) / 100.0)
+            obj.put("totalStorageGb", Math.round(totalStorageGb * 100.0) / 100.0)
+            promise.resolve(obj.toString())
+
       } catch (_: Exception) {
           promise.resolve("{\"freeRamMb\":0,\"totalRamMb\":0,\"freeStorageGb\":0,\"totalStorageGb\":0}")
       }
