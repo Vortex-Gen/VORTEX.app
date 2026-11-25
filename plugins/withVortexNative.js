@@ -2,6 +2,7 @@ const {
   withAndroidManifest,
   withDangerousMod,
   withMainApplication,
+  withMainApplication,
 } = require('expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
@@ -23,8 +24,12 @@ function withVortexManifest(config) {
     const app = manifest.application?.[0];
     if (!app) return cfg;
 
+    manifest.$ = manifest.$ || {};
+    manifest.$['xmlns:tools'] = 'http://schemas.android.com/tools';
+    
     app.$['android:usesCleartextTraffic'] = 'true';
     app.$['android:networkSecurityConfig'] = '@xml/network_security_config';
+    app.$['tools:replace'] = 'android:appComponentFactory';
 
     app.service = app.service || [];
     app.service = app.service.filter((s) => {
@@ -57,7 +62,16 @@ function withVortexManifest(config) {
         },
       ],
     });
-
+    property: [
+        {
+          $: {
+            'android:name': 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE',
+            'android:value': 'Floating assistant orb overlay',
+          },
+        },
+      ],
+    });
+  
     app.service.push({
       $: {
         'android:name': '.VortexFloatingService',
@@ -1075,9 +1089,27 @@ function withVortexMainApplication(config) {
   });
 }
 
+function withVortexGradle(config) {
+  return withGradleProperties(config, (cfg) => {
+    const props = cfg.modResults;
+    const setProp = (key, value) => {
+      const existing = props.find((p) => p.type === 'property' && p.key === key);
+      if (existing) {
+        existing.value = value;
+      } else {
+        props.push({ type: 'property', key, value });
+      }
+    };
+    setProp('android.useAndroidX', 'true');
+    setProp('android.enableJetifier', 'true');
+    return cfg;
+  });
+}
+
 module.exports = function withVortexNative(config) {
   config = withVortexManifest(config);
   config = withVortexNativeFiles(config);
   config = withVortexMainApplication(config);
+  config = withVortexGradle(config);
   return config;
 };
