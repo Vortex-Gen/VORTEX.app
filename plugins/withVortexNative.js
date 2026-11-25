@@ -43,7 +43,7 @@ function withVortexManifest(config) {
       ].includes(name);
     });
 
-    app.service.push({
+        app.service.push({
       $: {
         'android:name': '.VortexAccessibilityService',
         'android:permission': 'android.permission.BIND_ACCESSIBILITY_SERVICE',
@@ -63,7 +63,7 @@ function withVortexManifest(config) {
         },
       ],
     });
-  
+
     app.service.push({
       $: {
         'android:name': '.VortexFloatingService',
@@ -71,8 +71,7 @@ function withVortexManifest(config) {
         'android:exported': 'false',
         'android:foregroundServiceType': 'specialUse',
       },
-    };
-    property: [
+      property: [
         {
           $: {
             'android:name': 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE',
