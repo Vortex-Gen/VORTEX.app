@@ -223,23 +223,6 @@ class VortexAccessibilityService : AccessibilityService() {
         if (!pkg.isNullOrBlank()) {
             activePackage = pkg
         }
-        companion object {
-            @Volatile
-            var reactCtx: ReactApplicationContext? = null
-
-            fun emitJsEvent(eventName: String, payload: String) {
-                try {
-                    reactCtx
-                        ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-                        ?.emit(eventName, payload)
-                } catch (_: Exception) {}
-            }
-        }
-
-        init {
-            reactCtx = reactApplicationContext
-        }
-    
     }
 
     override fun onInterrupt() {}
@@ -1072,7 +1055,7 @@ class VortexNotificationListener : NotificationListenerService() {
         var isConnected: Boolean = false
 
         @Volatile
-        var lastNotification: String = ""
+        var lastNotificationSummary: String = ""
     }
 
     override fun onListenerConnected() {
@@ -1093,7 +1076,7 @@ class VortexNotificationListener : NotificationListenerService() {
         val title = extras.getCharSequence("android.title")?.toString() ?: ""
         val text = extras.getCharSequence("android.text")?.toString() ?: ""
         if (title.isNotEmpty() || text.isNotEmpty()) {
-            lastNotification = "$pkg: $title - $text"
+            lastNotificationSummary  = "$pkg: $title - $text"
         }
     }
 }
@@ -1142,7 +1125,7 @@ class VortexBridgeModule(private val reactCtx: ReactApplicationContext) :
   }
 
   init {
-      reactCtx = reactContext
+      reactCtx = reactApplicationContext
   }
   
     override fun getName(): String = "VortexBridge"
