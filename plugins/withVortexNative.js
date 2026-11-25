@@ -756,7 +756,7 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
-com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.ReactMethod
 
 class VortexBridgeModule(private val reactCtx: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactCtx) {
