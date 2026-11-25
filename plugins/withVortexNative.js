@@ -1478,7 +1478,7 @@ class VortexBridgeModule(private val reactCtx: ReactApplicationContext) :
             promise.resolve(obj.toString())
 
       } catch (_: Exception) {
-          promise.resolve("{\"freeRamMb\":0,\"totalRamMb\":0,\"freeStorageGb\":0,\"totalStorageGb\":0}")
+                    promise.resolve("{}")
       }
   }
 
