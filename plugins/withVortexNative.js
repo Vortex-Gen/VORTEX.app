@@ -216,14 +216,6 @@ class VortexAccessibilityService : AccessibilityService() {
         if (instance === this) {
             instance = null
         }
-        if (isLearningLock && event?.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
-            val src = event.source
-            val label = src?.text?.toString()?.trim() ?: src?.contentDescription?.toString()?.trim() ?: ""
-            if (label.isNotEmpty() && label.length <= 12) {
-                learnedLockBuffer = if (learnedLockBuffer.isEmpty()) label else learnedLockBuffer + "|" + label
-                VortexBridgeModule.emitJsEvent("VortexLockStep", (pkg ?: "") + "::" + learnedLockBuffer)
-            }
-        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -231,6 +223,23 @@ class VortexAccessibilityService : AccessibilityService() {
         if (!pkg.isNullOrBlank()) {
             activePackage = pkg
         }
+        companion object {
+            @Volatile
+            var reactCtx: ReactApplicationContext? = null
+
+            fun emitJsEvent(eventName: String, payload: String) {
+                try {
+                    reactCtx
+                        ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                        ?.emit(eventName, payload)
+                } catch (_: Exception) {}
+            }
+        }
+
+        init {
+            reactCtx = reactApplicationContext
+        }
+    
     }
 
     override fun onInterrupt() {}
@@ -1042,6 +1051,50 @@ class VortexQuickTileService : TileService() {
             qsTile?.state = Tile.STATE_ACTIVE
         }
         qsTile?.updateTile()
+    }
+}
+`
+      );
+
+			      writeFileIfChanged(
+        path.join(pkgPath, 'VortexNotificationListener.kt'),
+        `package com.vortex.app
+
+import android.service.notification.NotificationListenerService
+import android.service.notification.StatusBarNotification
+
+class VortexNotificationListener : NotificationListenerService() {
+    companion object {
+        @Volatile
+        var instance: VortexNotificationListener? = null
+
+        @Volatile
+        var isConnected: Boolean = false
+
+        @Volatile
+        var lastNotification: String = ""
+    }
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        instance = this
+        isConnected = true
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        isConnected = false
+        instance = null
+    }
+
+    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        val pkg = sbn?.packageName ?: return
+        val extras = sbn.notification?.extras ?: return
+        val title = extras.getCharSequence("android.title")?.toString() ?: ""
+        val text = extras.getCharSequence("android.text")?.toString() ?: ""
+        if (title.isNotEmpty() || text.isNotEmpty()) {
+            lastNotification = "$pkg: $title - $text"
+        }
     }
 }
 `
