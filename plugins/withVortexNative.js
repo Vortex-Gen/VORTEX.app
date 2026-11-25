@@ -30,7 +30,9 @@ function withVortexManifest(config) {
     
     app.$['android:usesCleartextTraffic'] = 'true';
     app.$['android:networkSecurityConfig'] = '@xml/network_security_config';
+    app.$['android:appComponentFactory'] = 'androidx.core.app.CoreComponentFactory';
     app.$['tools:replace'] = 'android:appComponentFactory';
+
 
     app.service = app.service || [];
     app.service = app.service.filter((s) => {
