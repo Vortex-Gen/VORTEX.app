@@ -1016,17 +1016,17 @@ class VortexBridgeModule(private val reactCtx: ReactApplicationContext) :
         promise.resolve(svc.typeIntoFocusedField(text))
     }
 
-      @ReactMethod
-  fun pressBack(promise: Promise) {
-      val svc = VortexAccessibilityService.instance
-      promise.resolve(svc?.pressGlobalBack() ?: false)
-  }
+    @ReactMethod
+    fun pressBack(promise: Promise) {
+        val svc = VortexAccessibilityService.instance
+        promise.resolve(svc?.pressGlobalBack() ?: false)
+    }
 
-  @ReactMethod
-  fun pressHome(promise: Promise) {
-      val svc = VortexAccessibilityService.instance
-      promise.resolve(svc?.pressGlobalHome() ?: false)
-  }
+    @ReactMethod
+    fun pressHome(promise: Promise) {
+        val svc = VortexAccessibilityService.instance
+        promise.resolve(svc?.pressGlobalHome() ?: false)
+    }
 
     private fun isAccessibilityServiceEnabled(): Boolean {
         val expected = ComponentName(reactCtx, VortexAccessibilityService::class.java).flattenToString()
