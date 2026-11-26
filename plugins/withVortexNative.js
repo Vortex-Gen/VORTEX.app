@@ -1,11 +1,18 @@
 const fs = require('fs');
 const path = require('path');
+
+let configPlugins;
+try {
+  configPlugins = require('expo/config-plugins');
+} catch (e) {
+  configPlugins = require('@expo/config-plugins');
+}
+
 const {
   withAndroidManifest,
-  withMainApplication,
   withStringsXml,
   withDangerousMod,
-} = require('@expo/config-plugins');
+} = configPlugins;
 
 function writeFileIfChanged(filePath, content) {
   const dir = path.dirname(filePath);
@@ -171,26 +178,6 @@ const withVortexManifest = (config) =>
     return cfg;
   });
 
-const withVortexMainApp = (config) =>
-  withMainApplication(config, (cfg) => {
-    let contents = cfg.modResults.contents;
-    if (!contents.includes('VortexPackage()')) {
-      if (contents.includes('PackageList(this).packages.apply {')) {
-        contents = contents.replace(
-          'PackageList(this).packages.apply {',
-          'PackageList(this).packages.apply {\n              add(VortexPackage())'
-        );
-      } else if (contents.includes('return PackageList(this).packages')) {
-        contents = contents.replace(
-          'return PackageList(this).packages',
-          'val pkgs = PackageList(this).packages\n            pkgs.add(VortexPackage())\n            return pkgs'
-        );
-      }
-    }
-    cfg.modResults.contents = contents;
-    return cfg;
-  });
-
 const withVortexKotlinFiles = (config) =>
   withDangerousMod(config, [
     'android',
@@ -198,6 +185,37 @@ const withVortexKotlinFiles = (config) =>
       const root = cfg.modRequest.platformProjectRoot;
       const pkgPath = path.join(root, 'app', 'src', 'main', 'java', 'com', 'vortex', 'app');
       const xmlPath = path.join(root, 'app', 'src', 'main', 'res', 'xml', 'vortex_accessibility_config.xml');
+
+      const mainAppKt = path.join(pkgPath, 'MainApplication.kt');
+      if (fs.existsSync(mainAppKt)) {
+        let kt = fs.readFileSync(mainAppKt, 'utf8');
+        if (!kt.includes('VortexPackage()')) {
+          if (kt.includes('PackageList(this).packages.apply {')) {
+            kt = kt.replace(
+              'PackageList(this).packages.apply {',
+              'PackageList(this).packages.apply {\n              add(VortexPackage())'
+            );
+          } else if (kt.includes('return PackageList(this).packages')) {
+            kt = kt.replace(
+              'return PackageList(this).packages',
+              'val pkgs = PackageList(this).packages\n            pkgs.add(VortexPackage())\n            return pkgs'
+            );
+          }
+          fs.writeFileSync(mainAppKt, kt, 'utf8');
+        }
+      }
+
+      const mainAppJava = path.join(pkgPath, 'MainApplication.java');
+      if (fs.existsSync(mainAppJava)) {
+        let jv = fs.readFileSync(mainAppJava, 'utf8');
+        if (!jv.includes('new VortexPackage()')) {
+          jv = jv.replace(
+            'return packages;',
+            'packages.add(new VortexPackage());\n          return packages;'
+          );
+          fs.writeFileSync(mainAppJava, jv, 'utf8');
+        }
+      }
 
       // 1. Accessibility XML (System floating button disabled so only single unified Orb exists)
       writeFileIfChanged(
@@ -215,7 +233,7 @@ const withVortexKotlinFiles = (config) =>
 `
       );
 
-      // 2. VortexAccessibilityService.kt (Vision, Human Bezier Ghost Touch, Code Injector, Lock Vault)
+      // 2. VortexAccessibilityService.kt
       writeFileIfChanged(
         path.join(pkgPath, 'VortexAccessibilityService.kt'),
         `package com.vortex.app
@@ -550,7 +568,7 @@ class VortexAccessibilityService : AccessibilityService() {
 `
       );
 
-      // 3. VortexFloatingService.kt (Single Unified 40% Dim Orb + Capsule + Zero-Beep Audio Ducking + Clipboard + Hardware Macros)
+            // 3. VortexFloatingService.kt
       writeFileIfChanged(
         path.join(pkgPath, 'VortexFloatingService.kt'),
         `package com.vortex.app
@@ -599,7 +617,7 @@ class VortexFloatingService : Service() {
         var isRunning: Boolean = false
 
         @Volatile
-        var micMode: String = "porcupine" // "porcupine" | "native_silent" | "stealth"
+        var micMode: String = "porcupine"
 
         @Volatile
         var baseIdleAlpha: Float = 0.40f
@@ -1133,7 +1151,7 @@ class VortexFloatingService : Service() {
 `
       );
 
-      // 4. VortexNotificationListener.kt (Live Notification Reader + Direct WhatsApp/App RemoteInput Reply)
+      // 4. VortexNotificationListener.kt
       writeFileIfChanged(
         path.join(pkgPath, 'VortexNotificationListener.kt'),
         `package com.vortex.app
@@ -1333,7 +1351,7 @@ class VortexBootReceiver : BroadcastReceiver() {
 `
       );
 
-      // 6. VortexBridgeModule.kt (Complete Native Bridge with Companion.reactCtx Fix)
+            // 6. VortexBridgeModule.kt
       writeFileIfChanged(
         path.join(pkgPath, 'VortexBridgeModule.kt'),
         `package com.vortex.app
@@ -1849,7 +1867,7 @@ class VortexPackage : ReactPackage {
 module.exports = function withVortexNative(config) {
   config = withVortexStrings(config);
   config = withVortexManifest(config);
-  config = withVortexMainApp(config);
   config = withVortexKotlinFiles(config);
   return config;
 };
+        
