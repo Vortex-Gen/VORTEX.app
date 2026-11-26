@@ -1,65 +1,81 @@
-const {
-  withAndroidManifest,
-  withDangerousMod,
-  withGradleProperties,
-  withMainApplication,
-} = require('expo/config-plugins');
-
 const fs = require('fs');
 const path = require('path');
-
-function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-}
+const {
+  withAndroidManifest,
+  withMainApplication,
+  withStringsXml,
+  withDangerousMod,
+} = require('@expo/config-plugins');
 
 function writeFileIfChanged(filePath, content) {
-  ensureDir(path.dirname(filePath));
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  if (fs.existsSync(filePath)) {
+    const existing = fs.readFileSync(filePath, 'utf8');
+    if (existing === content) return;
+  }
   fs.writeFileSync(filePath, content, 'utf8');
 }
 
-function withVortexManifest(config) {
-  return withAndroidManifest(config, (cfg) => {
-    const manifest = cfg.modResults.manifest;
-    const app = manifest.application?.[0];
-    if (!app) return cfg;
-
-    manifest.$ = manifest.$ || {};
-    manifest.$['xmlns:tools'] = 'http://schemas.android.com/tools';
-    manifest['uses-permission'] = manifest['uses-permission'] || [];
-    const extraPerms = [
-      'android.permission.RECORD_AUDIO',
-      'android.permission.CAMERA',
-      'android.permission.WAKE_LOCK',
-      'android.permission.VIBRATE',
-    ];
-    for (const perm of extraPerms) {
-      if (!manifest['uses-permission'].some((p) => p.$?.['android:name'] === perm)) {
-        manifest['uses-permission'].push({ $: { 'android:name': perm } });
+const withVortexStrings = (config) =>
+  withStringsXml(config, (cfg) => {
+    const strings = cfg.modResults.resources.string || [];
+    const upsert = (name, value) => {
+      const idx = strings.findIndex((s) => s.$ && s.$.name === name);
+      if (idx >= 0) {
+        strings[idx]._ = value;
+      } else {
+        strings.push({ $: { name }, _: value });
       }
+    };
+    upsert('vortex_accessibility_desc', 'VORTEX Autonomous Vision, Human Ghost Touch, and Study Code Injector');
+    upsert('vortex_tile_label', 'Vortex Orb');
+    cfg.modResults.resources.string = strings;
+    return cfg;
+  });
+
+const withVortexManifest = (config) =>
+  withAndroidManifest(config, (cfg) => {
+    const manifest = cfg.modResults.manifest;
+
+    if (!manifest.queries) {
+      manifest.queries = [{}];
     }
-    
-    app.$['android:usesCleartextTraffic'] = 'true';
-    app.$['android:networkSecurityConfig'] = '@xml/network_security_config';
-    app.$['android:appComponentFactory'] = 'androidx.core.app.CoreComponentFactory';
-    app.$['tools:replace'] = 'android:appComponentFactory';
+    const q = manifest.queries[0];
+    if (!q.intent) q.intent = [];
+    const ensureIntent = (actionName) => {
+      const exists = q.intent.some(
+        (it) => it.action && it.action[0] && it.action[0].$['android:name'] === actionName
+      );
+      if (!exists) {
+        q.intent.push({
+          action: [{ $: { 'android:name': actionName } }],
+        });
+      }
+    };
+    ensureIntent('android.intent.action.MAIN');
+    ensureIntent('android.speech.RecognitionService');
+    ensureIntent('android.intent.action.TTS_SERVICE');
 
+    const app = manifest.application[0];
+    if (!app.service) app.service = [];
+    if (!app.receiver) app.receiver = [];
 
-    app.service = app.service || [];
-    app.service = app.service.filter((s) => {
-      const name = s.$?.['android:name'] || '';
-      return ![
-        '.VortexAccessibilityService',
-        '.VortexFloatingService',
-        '.VortexNotificationListener',
-        '.VortexQuickTileService',
-      ].includes(name);
-    });
+    const upsertService = (name, entry) => {
+      const idx = app.service.findIndex((s) => s.$ && s.$['android:name'] === name);
+      if (idx >= 0) {
+        app.service[idx] = entry;
+      } else {
+        app.service.push(entry);
+      }
+    };
 
-        app.service.push({
+    upsertService('.VortexAccessibilityService', {
       $: {
         'android:name': '.VortexAccessibilityService',
+        'android:label': 'Vortex Autonomous Engine',
         'android:permission': 'android.permission.BIND_ACCESSIBILITY_SERVICE',
         'android:exported': 'true',
       },
@@ -78,117 +94,152 @@ function withVortexManifest(config) {
       ],
     });
 
-    app.service.push({
+    upsertService('.VortexFloatingService', {
       $: {
         'android:name': '.VortexFloatingService',
         'android:enabled': 'true',
         'android:exported': 'false',
-        'android:foregroundServiceType': 'specialUse',
+        'android:foregroundServiceType': 'microphone|specialUse',
       },
       property: [
         {
           $: {
             'android:name': 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE',
-            'android:value': 'Floating assistant orb overlay',
+            'android:value': 'Autonomous AI Floating Orb and Voice Assistant',
           },
         },
       ],
     });
 
-    app.service.push({
+    upsertService('.VortexNotificationListener', {
       $: {
         'android:name': '.VortexNotificationListener',
+        'android:label': 'Vortex Notification Copilot',
         'android:permission': 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE',
         'android:exported': 'true',
       },
       'intent-filter': [
         {
           action: [
-            { $: { 'android:name': 'android.service.notification.NotificationListenerService' } },
+            {
+              $: {
+                'android:name': 'android.service.notification.NotificationListenerService',
+              },
+            },
           ],
         },
       ],
     });
 
-    app.service.push({
+    upsertService('.VortexQuickTileService', {
       $: {
         'android:name': '.VortexQuickTileService',
+        'android:label': '@string/vortex_tile_label',
         'android:icon': '@mipmap/ic_launcher',
-        'android:label': 'Vortex ẞ',
         'android:permission': 'android.permission.BIND_QUICK_SETTINGS_TILE',
         'android:exported': 'true',
       },
       'intent-filter': [
         {
-          action: [
-            { $: { 'android:name': 'android.service.quicksettings.action.QS_TILE' } },
-          ],
+          action: [{ $: { 'android:name': 'android.service.quicksettings.action.QS_TILE' } }],
         },
       ],
     });
 
+    const bootIdx = app.receiver.findIndex((r) => r.$ && r.$['android:name'] === '.VortexBootReceiver');
+    const bootEntry = {
+      $: {
+        'android:name': '.VortexBootReceiver',
+        'android:enabled': 'true',
+        'android:exported': 'true',
+      },
+      'intent-filter': [
+        {
+          action: [
+            { $: { 'android:name': 'android.intent.action.BOOT_COMPLETED' } },
+            { $: { 'android:name': 'android.intent.action.MY_PACKAGE_REPLACED' } },
+          ],
+        },
+      ],
+    };
+    if (bootIdx >= 0) {
+      app.receiver[bootIdx] = bootEntry;
+    } else {
+      app.receiver.push(bootEntry);
+    }
+
     return cfg;
   });
-}
 
-function withVortexNativeFiles(config) {
-  return withDangerousMod(config, [
+const withVortexMainApp = (config) =>
+  withMainApplication(config, (cfg) => {
+    let contents = cfg.modResults.contents;
+    if (!contents.includes('VortexPackage()')) {
+      if (contents.includes('PackageList(this).packages.apply {')) {
+        contents = contents.replace(
+          'PackageList(this).packages.apply {',
+          'PackageList(this).packages.apply {\n              add(VortexPackage())'
+        );
+      } else if (contents.includes('return PackageList(this).packages')) {
+        contents = contents.replace(
+          'return PackageList(this).packages',
+          'val pkgs = PackageList(this).packages\n            pkgs.add(VortexPackage())\n            return pkgs'
+        );
+      }
+    }
+    cfg.modResults.contents = contents;
+    return cfg;
+  });
+
+const withVortexKotlinFiles = (config) =>
+  withDangerousMod(config, [
     'android',
     async (cfg) => {
-      const projectRoot = cfg.modRequest.projectRoot;
-      const pkgPath = path.join(projectRoot, 'android', 'app', 'src', 'main', 'java', 'com', 'vortex', 'app');
-      const xmlDir = path.join(projectRoot, 'android', 'app', 'src', 'main', 'res', 'xml');
-      const proguardPath = path.join(projectRoot, 'android', 'app', 'proguard-rules.pro');
+      const root = cfg.modRequest.platformProjectRoot;
+      const pkgPath = path.join(root, 'app', 'src', 'main', 'java', 'com', 'vortex', 'app');
+      const xmlPath = path.join(root, 'app', 'src', 'main', 'res', 'xml', 'vortex_accessibility_config.xml');
 
+      // 1. Accessibility XML (System floating button disabled so only single unified Orb exists)
       writeFileIfChanged(
-        path.join(xmlDir, 'vortex_accessibility_config.xml'),
+        xmlPath,
         `<?xml version="1.0" encoding="utf-8"?>
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeNotificationStateChanged"
+    android:description="@string/vortex_accessibility_desc"
+    android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
-    android:canPerformGestures="true"
+    android:notificationTimeout="80"
     android:canRetrieveWindowContent="true"
-    android:notificationTimeout="120" />
+    android:canPerformGestures="true"
+    android:canTakeScreenshot="true"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews" />
 `
       );
 
-      writeFileIfChanged(
-        path.join(xmlDir, 'network_security_config.xml'),
-        `<?xml version="1.0" encoding="utf-8"?>
-<network-security-config>
-    <base-config cleartextTrafficPermitted="true">
-        <trust-anchors>
-            <certificates src="system" />
-        </trust-anchors>
-    </base-config>
-</network-security-config>
-`
-      );
-
-      writeFileIfChanged(
-        proguardPath,
-        `-keep class com.vortex.app.** { *; }
--keepclassmembers class com.vortex.app.** { *; }
-`
-      );
-
+      // 2. VortexAccessibilityService.kt (Vision, Human Bezier Ghost Touch, Code Injector, Lock Vault)
       writeFileIfChanged(
         path.join(pkgPath, 'VortexAccessibilityService.kt'),
         `package com.vortex.app
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
-import android.os.Bundle
-import android.view.accessibility.AccessibilityEvent
-import android.view.accessibility.AccessibilityNodeInfo
-import android.graphics.Bitmap
 import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
 import android.view.Display
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.util.Random
 
 class VortexAccessibilityService : AccessibilityService() {
 
@@ -206,254 +257,48 @@ class VortexAccessibilityService : AccessibilityService() {
         var learnedLockBuffer: String = ""
     }
 
+    private val random = Random()
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        VortexBridgeModule.emitJsEvent("VortexAccessibilityState", "CONNECTED")
+    }
+
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
+        instance = null
+        VortexBridgeModule.emitJsEvent("VortexAccessibilityState", "DISCONNECTED")
+        return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
+        instance = null
         super.onDestroy()
-        if (instance === this) {
-            instance = null
-        }
-    }
-
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        val pkg = event?.packageName?.toString()
-        if (!pkg.isNullOrBlank()) {
-            activePackage = pkg
-        }
     }
 
     override fun onInterrupt() {}
 
-    fun readScreenSummary(maxItems: Int = 45): String {
-        val root = rootInActiveWindow ?: return "Screen node unavailable"
-        val items = ArrayList<String>()
-        val seen = HashSet<String>()
-
-        fun walk(node: AccessibilityNodeInfo?) {
-            if (node == null || items.size >= maxItems) return
-            val txt = node.text?.toString()?.trim()
-            val desc = node.contentDescription?.toString()?.trim()
-            val label = when {
-                !txt.isNullOrEmpty() -> txt
-                !desc.isNullOrEmpty() -> desc
-                else -> null
-            }
-            if (label != null && seen.add(label)) {
-                val role = if (node.isClickable) "[BTN]" else "[TXT]"
-                items.add("$role $label")
-            }
-            for (i in 0 until node.childCount) {
-                walk(node.getChild(i))
-                if (items.size >= maxItems) break
-            }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        val pkg = event?.packageName?.toString() ?: return
+        if (pkg.isNotBlank() && pkg != activePackage) {
+            activePackage = pkg
+            VortexBridgeModule.emitJsEvent("VortexPackageChanged", pkg)
         }
 
-        walk(root)
-        return if (items.isEmpty()) {
-            "Active app: $activePackage (no text nodes detected)"
-        } else {
-            "App: $activePackage | Elements: " + items.joinToString(" • ")
+        if (isLearningLock && event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            val src = event.source
+            val label = src?.text?.toString()?.trim()
+                ?: src?.contentDescription?.toString()?.trim()
+                ?: ""
+            if (label.isNotEmpty() && label.length <= 12) {
+                learnedLockBuffer = if (learnedLockBuffer.isEmpty()) label else learnedLockBuffer + "|" + label
+                VortexBridgeModule.emitJsEvent("VortexLockStep", pkg + "::" + learnedLockBuffer)
+            }
         }
     }
 
-    fun tapByText(targetText: String, callback: ((Boolean) -> Unit)? = null): Boolean {
-        val root = rootInActiveWindow ?: run {
-            callback?.invoke(false)
-            return false
-        }
-        val query = targetText.trim().lowercase()
-        var matched: AccessibilityNodeInfo? = null
-
-        fun findNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-            if (node == null) return null
-            val t = node.text?.toString()?.trim()?.lowercase() ?: ""
-            val d = node.contentDescription?.toString()?.trim()?.lowercase() ?: ""
-            if (t == query || d == query || t.contains(query) || d.contains(query)) {
-                var cur: AccessibilityNodeInfo? = node
-                while (cur != null) {
-                    if (cur.isClickable) return cur
-                    cur = cur.parent
-                }
-                return node
-            }
-            for (i in 0 until node.childCount) {
-                val res = findNode(node.getChild(i))
-                if (res != null) return res
-            }
-            return null
-        }
-
-        matched = findNode(root)
-        if (matched != null) {
-            val clicked = matched.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            if (clicked) {
-                callback?.invoke(true)
-                return true
-            }
-            val rect = Rect()
-            matched.getBoundsInScreen(rect)
-            if (!rect.isEmpty) {
-                return tapAtPoint(rect.exactCenterX(), rect.exactCenterY(), callback)
-            }
-        }
-
-        callback?.invoke(false)
-        return false
-    }
-
-    fun tapAtPoint(x: Float, y: Float, callback: ((Boolean) -> Unit)? = null): Boolean {
-        val path = Path().apply { moveTo(x, y) }
-        val stroke = GestureDescription.StrokeDescription(path, 0L, 80L)
-        val gesture = GestureDescription.Builder().addStroke(stroke).build()
-        return dispatchGesture(
-            gesture,
-            object : GestureResultCallback() {
-                override fun onCompleted(gestureDescription: GestureDescription?) {
-                    callback?.invoke(true)
-                }
-                override fun onCancelled(gestureDescription: GestureDescription?) {
-                    callback?.invoke(false)
-                }
-            },
-            null
-        )
-    }
-
-    fun swipeDirection(direction: String, callback: ((Boolean) -> Unit)? = null): Boolean {
-        val metrics = resources.displayMetrics
-        val w = metrics.widthPixels.toFloat()
-        val h = metrics.heightPixels.toFloat()
-
-        val startX: Float
-        val startY: Float
-        val endX: Float
-        val endY: Float
-
-        when (direction.trim().lowercase()) {
-            "up" -> {
-                startX = w * 0.5f
-                startY = h * 0.78f
-                endX = w * 0.5f
-                endY = h * 0.24f
-            }
-            "down" -> {
-                startX = w * 0.5f
-                startY = h * 0.26f
-                endX = w * 0.5f
-                endY = h * 0.78f
-            }
-            "left" -> {
-                startX = w * 0.85f
-                startY = h * 0.5f
-                endX = w * 0.15f
-                endY = h * 0.5f
-            }
-            "right" -> {
-                startX = w * 0.15f
-                startY = h * 0.5f
-                endX = w * 0.85f
-                endY = h * 0.5f
-            }
-            else -> {
-                callback?.invoke(false)
-                return false
-            }
-        }
-
-        val path = Path().apply {
-            moveTo(startX, startY)
-            lineTo(endX, endY)
-        }
-        val stroke = GestureDescription.StrokeDescription(path, 0L, 260L)
-        val gesture = GestureDescription.Builder().addStroke(stroke).build()
-        return dispatchGesture(
-            gesture,
-            object : GestureResultCallback() {
-                override fun onCompleted(gestureDescription: GestureDescription?) {
-                    callback?.invoke(true)
-                }
-                override fun onCancelled(gestureDescription: GestureDescription?) {
-                    callback?.invoke(false)
-                }
-            },
-            null
-        )
-    }
-
-    fun typeIntoFocusedField(text: String): Boolean {
-        val root = rootInActiveWindow ?: return false
-        fun findEditable(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-            if (node == null) return null
-            if (node.isEditable || node.isFocused) return node
-            for (i in 0 until node.childCount) {
-                val found = findEditable(node.getChild(i))
-                if (found != null) return found
-            }
-            return null
-        }
-        val target = findEditable(root) ?: return false
-        val args = Bundle().apply {
-            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-        }
-        return target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-    }
-
-    fun pressGlobalBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
-    fun pressGlobalHome(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
-    fun lockScreenNow(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
-        } else {
-            false
-        }
-    }
-
-    fun openPowerDialogNow(): Boolean = performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)
-
-    fun toggleSplitScreenNow(): Boolean = performGlobalAction(GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN)
-
-    fun drawGesturePath(normalizedCoords: String, callback: ((Boolean) -> Unit)? = null): Boolean {
-        val parts = normalizedCoords.split(";").mapNotNull { pair ->
-            val xy = pair.split(",")
-            if (xy.size == 2) {
-                val nx = xy[0].trim().toFloatOrNull()
-                val ny = xy[1].trim().toFloatOrNull()
-                if (nx != null && ny != null) Pair(nx, ny) else null
-            } else null
-        }
-        if (parts.size < 2) {
-            callback?.invoke(false)
-            return false
-        }
-        val metrics = resources.displayMetrics
-        val w = metrics.widthPixels.toFloat()
-        val h = metrics.heightPixels.toFloat()
-        val path = Path()
-        path.moveTo(parts[0].first * w, parts[0].second * h)
-        for (i in 1 until parts.size) {
-            path.lineTo(parts[i].first * w, parts[i].second * h)
-        }
-        val duration = (parts.size * 95L).coerceIn(220L, 1200L)
-        val stroke = GestureDescription.StrokeDescription(path, 0L, duration)
-        val gesture = GestureDescription.Builder().addStroke(stroke).build()
-        return dispatchGesture(
-            gesture,
-            object : GestureResultCallback() {
-                override fun onCompleted(gestureDescription: GestureDescription?) {
-                    callback?.invoke(true)
-                }
-                override fun onCancelled(gestureDescription: GestureDescription?) {
-                    callback?.invoke(false)
-                }
-            },
-            null
-        )
-    }
-
-    fun captureSilentScreenshot(callback: (String?) -> Unit) {
+    fun captureSilentScreenshotBase64(callback: (String?) -> Unit) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             callback(null)
             return
@@ -467,23 +312,33 @@ class VortexAccessibilityService : AccessibilityService() {
                         try {
                             val hwBuffer = screenshot.hardwareBuffer
                             val colorSpace = screenshot.colorSpace
-                            val bitmap = Bitmap.wrapHardwareBuffer(hwBuffer, colorSpace)
-                            hwBuffer.close()
-                            if (bitmap == null) {
+                            val hwBitmap = Bitmap.wrapHardwareBuffer(hwBuffer, colorSpace)
+                            if (hwBitmap == null) {
+                                hwBuffer.close()
                                 callback(null)
                                 return
                             }
-                            val softBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
-                            bitmap.recycle()
+                            val softBitmap = hwBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                            hwBuffer.close()
+                            hwBitmap.recycle()
+
+                            val targetW = 720
+                            val scale = targetW.toFloat() / softBitmap.width.coerceAtLeast(1).toFloat()
+                            val targetH = (softBitmap.height * scale).toInt().coerceAtLeast(1)
+                            val scaled = Bitmap.createScaledBitmap(softBitmap, targetW, targetH, true)
+                            if (scaled != softBitmap) softBitmap.recycle()
+
                             val out = ByteArrayOutputStream()
-                            softBitmap.compress(Bitmap.CompressFormat.JPEG, 65, out)
-                            softBitmap.recycle()
+                            scaled.compress(Bitmap.CompressFormat.JPEG, 76, out)
+                            scaled.recycle()
+
                             val b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
                             callback(b64)
                         } catch (_: Exception) {
                             callback(null)
                         }
                     }
+
                     override fun onFailure(errorCode: Int) {
                         callback(null)
                     }
@@ -493,37 +348,239 @@ class VortexAccessibilityService : AccessibilityService() {
             callback(null)
         }
     }
+
+    fun dumpScreenDomJson(): String {
+        val arr = JSONArray()
+        val root = rootInActiveWindow ?: return arr.toString()
+
+        fun traverse(node: AccessibilityNodeInfo?, depth: Int) {
+            if (node == null || depth > 14 || arr.length() >= 130) return
+            val text = node.text?.toString()?.trim() ?: ""
+            val desc = node.contentDescription?.toString()?.trim() ?: ""
+            val viewId = node.viewIdResourceName ?: ""
+            val bounds = Rect()
+            node.getBoundsInScreen(bounds)
+
+            if ((text.isNotEmpty() || desc.isNotEmpty() || node.isClickable || node.isEditable) &&
+                bounds.width() > 4 && bounds.height() > 4
+            ) {
+                val obj = JSONObject()
+                if (text.isNotEmpty()) obj.put("text", text.take(160))
+                if (desc.isNotEmpty()) obj.put("desc", desc.take(120))
+                if (viewId.isNotEmpty()) obj.put("id", viewId.substringAfterLast("/"))
+                obj.put("clickable", node.isClickable)
+                obj.put("editable", node.isEditable)
+                obj.put("scrollable", node.isScrollable)
+                obj.put("cx", bounds.centerX())
+                obj.put("cy", bounds.centerY())
+                arr.put(obj)
+            }
+
+            for (i in 0 until node.childCount) {
+                traverse(node.getChild(i), depth + 1)
+            }
+        }
+
+        try {
+            traverse(root, 0)
+        } catch (_: Exception) {}
+        return arr.toString()
+    }
+
+    fun humanTap(x: Float, y: Float): Boolean {
+        val jitterX = (x + (random.nextFloat() * 10f - 5f)).coerceAtLeast(1f)
+        val jitterY = (y + (random.nextFloat() * 10f - 5f)).coerceAtLeast(1f)
+        val holdMs = (50 + random.nextInt(55)).toLong()
+        val path = Path().apply { moveTo(jitterX, jitterY) }
+        val stroke = GestureDescription.StrokeDescription(path, 0L, holdMs)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        return dispatchGesture(gesture, null, null)
+    }
+
+    fun humanSwipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long): Boolean {
+        val midX = (x1 + x2) / 2f + (random.nextFloat() * 70f - 35f)
+        val midY = (y1 + y2) / 2f + (random.nextFloat() * 70f - 35f)
+        val safeDur = durationMs.coerceIn(180L, 1400L)
+        val path = Path().apply {
+            moveTo(x1.coerceAtLeast(1f), y1.coerceAtLeast(1f))
+            quadTo(midX.coerceAtLeast(1f), midY.coerceAtLeast(1f), x2.coerceAtLeast(1f), y2.coerceAtLeast(1f))
+        }
+        val stroke = GestureDescription.StrokeDescription(path, 0L, safeDur)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        return dispatchGesture(gesture, null, null)
+    }
+
+    fun drawPatternGesture(pointsCsv: String): Boolean {
+        val pairs = pointsCsv.split(";").mapNotNull { token ->
+            val parts = token.split(",")
+            if (parts.size == 2) {
+                val px = parts[0].trim().toFloatOrNull()
+                val py = parts[1].trim().toFloatOrNull()
+                if (px != null && py != null) Pair(px, py) else null
+            } else null
+        }
+        if (pairs.size < 2) return false
+        val path = Path().apply {
+            moveTo(pairs[0].first, pairs[0].second)
+            for (i in 1 until pairs.size) {
+                lineTo(pairs[i].first, pairs[i].second)
+            }
+        }
+        val stroke = GestureDescription.StrokeDescription(path, 0L, 480L)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        return dispatchGesture(gesture, null, null)
+    }
+
+    fun clickNodeByQuery(query: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val target = query.trim().lowercase()
+        if (target.isEmpty()) return false
+
+        var matched: AccessibilityNodeInfo? = null
+
+        fun search(node: AccessibilityNodeInfo?) {
+            if (node == null || matched != null) return
+            val t = node.text?.toString()?.lowercase() ?: ""
+            val d = node.contentDescription?.toString()?.lowercase() ?: ""
+            val id = node.viewIdResourceName?.lowercase() ?: ""
+            if (t.contains(target) || d.contains(target) || id.endsWith(target)) {
+                matched = node
+                return
+            }
+            for (i in 0 until node.childCount) {
+                search(node.getChild(i))
+            }
+        }
+
+        search(root)
+        val found = matched ?: return false
+
+        var clickCandidate: AccessibilityNodeInfo? = found
+        var hops = 0
+        while (clickCandidate != null && !clickCandidate.isClickable && hops < 4) {
+            clickCandidate = clickCandidate.parent
+            hops++
+        }
+        if (clickCandidate != null && clickCandidate.isClickable) {
+            if (clickCandidate.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+        }
+
+        val rect = Rect()
+        found.getBoundsInScreen(rect)
+        if (rect.width() > 0 && rect.height() > 0) {
+            return humanTap(rect.centerX().toFloat(), rect.centerY().toFloat())
+        }
+        return false
+    }
+
+    fun injectTextToEditable(text: String, humanMode: Boolean): Boolean {
+        val root = rootInActiveWindow ?: return false
+        var targetNode: AccessibilityNodeInfo? = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+
+        if (targetNode == null || !targetNode.isEditable) {
+            fun findEditable(node: AccessibilityNodeInfo?) {
+                if (node == null || targetNode != null) return
+                if (node.isEditable && node.isVisibleToUser) {
+                    targetNode = node
+                    return
+                }
+                for (i in 0 until node.childCount) {
+                    findEditable(node.getChild(i))
+                }
+            }
+            findEditable(root)
+        }
+
+        val node = targetNode ?: return false
+        node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+
+        if (!humanMode || text.length > 45) {
+            val args = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            }
+            val ok = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            if (ok) return true
+
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            cm?.setPrimaryClip(ClipData.newPlainText("VortexCode", text))
+            return node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+        } else {
+            var current = ""
+            for (i in text.indices) {
+                val ch = text[i]
+                val delay = (i * (42 + random.nextInt(48))).toLong()
+                mainHandler.postDelayed({
+                    current += ch
+                    val args = Bundle().apply {
+                        putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, current)
+                    }
+                    node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                }, delay)
+            }
+            return true
+        }
+    }
+
+    fun replayPinNodes(pinCsv: String): Boolean {
+        val digits = pinCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        if (digits.isEmpty()) return false
+        digits.forEachIndexed { idx, digit ->
+            mainHandler.postDelayed({
+                clickNodeByQuery(digit)
+            }, (idx * 240L))
+        }
+        return true
+    }
+
+    fun executeGlobalActionName(name: String): Boolean {
+        val code = when (name.uppercase()) {
+            "BACK" -> GLOBAL_ACTION_BACK
+            "HOME" -> GLOBAL_ACTION_HOME
+            "RECENTS" -> GLOBAL_ACTION_RECENTS
+            "NOTIFICATIONS" -> GLOBAL_ACTION_NOTIFICATIONS
+            "QUICK_SETTINGS" -> GLOBAL_ACTION_QUICK_SETTINGS
+            "POWER_DIALOG" -> GLOBAL_ACTION_POWER_DIALOG
+            "LOCK_SCREEN" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) GLOBAL_ACTION_LOCK_SCREEN else return false
+            "SPLIT_SCREEN" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN else return false
+            else -> return false
+        }
+        return performGlobalAction(code)
+    }
 }
 `
       );
 
-            writeFileIfChanged(
+      // 3. VortexFloatingService.kt (Single Unified 40% Dim Orb + Capsule + Zero-Beep Audio Ducking + Clipboard + Hardware Macros)
+      writeFileIfChanged(
         path.join(pkgPath, 'VortexFloatingService.kt'),
         `package com.vortex.app
 
-import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
+import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.provider.Settings
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
-import android.util.TypedValue
+import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -535,201 +592,204 @@ import java.util.Locale
 class VortexFloatingService : Service() {
 
     companion object {
-        const val CHANNEL_ID = "vortex_beta_orb_channel"
-        const val NOTIF_ID = 7070
-        const val ACTION_START = "com.vortex.app.action.START_ORB"
-        const val ACTION_STOP = "com.vortex.app.action.STOP_ORB"
-        const val ACTION_SET_OPACITY = "com.vortex.app.action.SET_OPACITY"
-        const val ACTION_UPDATE_HUD = "com.vortex.app.action.UPDATE_HUD"
+        @Volatile
+        var instance: VortexFloatingService? = null
 
         @Volatile
         var isRunning: Boolean = false
 
         @Volatile
-        var idleAlpha: Float = 0.10f
+        var micMode: String = "porcupine" // "porcupine" | "native_silent" | "stealth"
+
+        @Volatile
+        var baseIdleAlpha: Float = 0.40f
     }
 
-    private var windowManager: WindowManager? = null
-    private var rootContainer: LinearLayout? = null
+    private lateinit var windowManager: WindowManager
     private var orbView: TextView? = null
-    private var hudCapsule: LinearLayout? = null
-    private var hudStatusText: TextView? = null
-    private var hudSubText: TextView? = null
-    private var layoutParams: WindowManager.LayoutParams? = null
+    private var orbParams: WindowManager.LayoutParams? = null
+    private var capsuleView: LinearLayout? = null
+    private var capsuleParams: WindowManager.LayoutParams? = null
+    private var capsuleTitleView: TextView? = null
+    private var capsuleBodyView: TextView? = null
+
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var screenWidth = 1080
+    private var screenHeight = 2200
+    private var isCapsuleOpen = false
 
     private var speechRecognizer: SpeechRecognizer? = null
-    private var isActiveCommandMode: Boolean = false
-    private var isCapsuleExpanded: Boolean = false
+    private var isListeningNative = false
+    private var lastClipText = ""
+    private var lastClipTime = 0L
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    private val dimRunnable = Runnable {
+        if (!isCapsuleOpen && !isListeningNative) {
+            orbView?.animate()?.alpha(baseIdleAlpha)?.setDuration(350)?.start()
+        }
+    }
+
+    private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
+        try {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            val clip = cm?.primaryClip
+            if (clip != null && clip.itemCount > 0) {
+                val txt = clip.getItemAt(0).coerceToText(this)?.toString()?.trim() ?: ""
+                val now = System.currentTimeMillis()
+                if (txt.length >= 4 && (txt != lastClipText || now - lastClipTime > 4000L)) {
+                    lastClipText = txt
+                    lastClipTime = now
+                    pulseOrbTemporarily(0.90f, 1600L)
+                    VortexBridgeModule.emitJsEvent("VortexClipboardChanged", txt.take(2500))
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private val hardwareReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_POWER_CONNECTED -> {
+                    pulseOrbTemporarily(0.95f, 1500L)
+                    VortexBridgeModule.emitJsEvent("VortexHardwareEvent", "CHARGER_CONNECTED")
+                }
+                Intent.ACTION_POWER_DISCONNECTED -> {
+                    VortexBridgeModule.emitJsEvent("VortexHardwareEvent", "CHARGER_DISCONNECTED")
+                }
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
-        startForeground(NOTIF_ID, buildNotification())
+        instance = this
         isRunning = true
-        if (Settings.canDrawOverlays(this)) {
-            showFloatingOrb()
+
+        getSharedPreferences("vortex_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("orb_enabled", true)
+            .apply()
+
+        startForegroundNotification()
+        windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val metrics = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        windowManager.defaultDisplay.getMetrics(metrics)
+        screenWidth = metrics.widthPixels
+        screenHeight = metrics.heightPixels
+
+        createUnifiedOrb()
+        createGlassCapsule()
+
+        try {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            cm?.addPrimaryClipChangedListener(clipListener)
+        } catch (_: Exception) {}
+
+        try {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_POWER_CONNECTED)
+                addAction(Intent.ACTION_POWER_DISCONNECTED)
+            }
+            registerReceiver(hardwareReceiver, filter)
+        } catch (_: Exception) {}
+
+        if (micMode == "native_silent") {
+            mainHandler.postDelayed({ startZeroBeepListen() }, 900L)
         }
-        mainHandler.postDelayed({ startListeningLoop(false) }, 900L)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_STOP -> {
-                destroySpeech()
-                removeFloatingOrb()
-                isRunning = false
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-                return START_NOT_STICKY
-            }
-            ACTION_SET_OPACITY -> {
-                val requested = intent.getFloatExtra("idleAlpha", 0.10f)
-                idleAlpha = requested.coerceIn(0.05f, 1.0f)
-                if (!isCapsuleExpanded) {
-                    orbView?.alpha = idleAlpha
-                }
-            }
-            ACTION_UPDATE_HUD -> {
-                val title = intent.getStringExtra("title") ?: "VORTEX ẞ"
-                val detail = intent.getStringExtra("detail") ?: ""
-                val autoHideMs = intent.getLongExtra("autoHideMs", 4500L)
-                showHudMessage(title, detail, autoHideMs)
-            }
-            else -> {
-                if (!isRunning) {
-                    isRunning = true
-                    startForeground(NOTIF_ID, buildNotification())
-                }
-                if (Settings.canDrawOverlays(this) && rootContainer == null) {
-                    showFloatingOrb()
-                }
-                startListeningLoop(false)
-            }
-        }
         return START_STICKY
     }
 
+    override fun onBind(intent: Intent?): IBinder? = null
+
     override fun onDestroy() {
-        destroySpeech()
-        removeFloatingOrb()
         isRunning = false
+        instance = null
+        try {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            cm?.removePrimaryClipChangedListener(clipListener)
+        } catch (_: Exception) {}
+        try {
+            unregisterReceiver(hardwareReceiver)
+        } catch (_: Exception) {}
+        try {
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {}
+        try {
+            if (orbView != null) windowManager.removeView(orbView)
+            if (capsuleView != null) windowManager.removeView(capsuleView)
+        } catch (_: Exception) {}
         super.onDestroy()
     }
 
-    private fun createNotificationChannel() {
+    private fun startForegroundNotification() {
+        val channelId = "vortex_core_channel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Vortex ẞ Neural Core",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "24/7 off-app wakeword and floating glass capsule"
-                setShowBadge(false)
-            }
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.createNotificationChannel(channel)
+            val ch = NotificationChannel(
+                channelId,
+                "Vortex Autonomous Core",
+                NotificationManager.IMPORTANCE_MIN
+            ).apply {
+                setShowBadge(false)
+                setSound(null, null)
+            }
+            nm.createNotificationChannel(ch)
         }
-    }
 
-    private fun buildNotification(): Notification {
-        val openIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val piFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+        val pi = PendingIntent.getActivity(
+            this,
+            0,
+            launchIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        } else {
-            PendingIntent.FLAG_UPDATE_CURRENT
-        }
-        val pendingIntent = PendingIntent.getActivity(this, 0, openIntent, piFlags)
+        )
 
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
+            Notification.Builder(this, channelId)
         } else {
+            @Suppress("DEPRECATION")
             Notification.Builder(this)
         }
 
-        return builder
-            .setContentTitle("Vortex ẞ Neural Core")
-            .setContentText("Wakeword & floating capsule standby")
-            .setSmallIcon(applicationInfo.icon)
-            .setContentIntent(pendingIntent)
+        val notification = builder
+            .setContentTitle("VORTEX ẞ Active")
+            .setContentText("Autonomous Orb & Vision Ready")
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setContentIntent(pi)
             .setOngoing(true)
             .build()
+
+        startForeground(4041, notification)
     }
 
-    private fun dp(v: Float): Int {
-        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics).toInt()
-    }
+    private fun createUnifiedOrb() {
+        val sizePx = (52 * resources.displayMetrics.density).toInt()
+        val prefs = getSharedPreferences("vortex_prefs", Context.MODE_PRIVATE)
+        val savedX = prefs.getInt("orb_x", screenWidth - sizePx - 20)
+        val savedY = prefs.getInt("orb_y", screenHeight / 3)
 
-    private fun showFloatingOrb() {
-        if (rootContainer != null) return
-        val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        windowManager = wm
-
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        val capsuleBg = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(24f).toFloat()
-            setColor(Color.argb(232, 10, 14, 24))
-            setStroke(dp(1.2f), Color.parseColor("#9900F0FF"))
-        }
-
-        val capsule = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = capsuleBg
-            setPadding(dp(14f), dp(8f), dp(14f), dp(8f))
-            visibility = View.GONE
-        }
-
-        val statusTxt = TextView(this).apply {
-            text = "VORTEX ẞ  ≡  LISTENING"
-            setTextColor(Color.parseColor("#00F0FF"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-            typeface = Typeface.MONOSPACE
-        }
-
-        val subTxt = TextView(this).apply {
-            text = "Speak command or tap ẞ to close"
-            setTextColor(Color.parseColor("#E2E8F0"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            maxLines = 3
-        }
-
-        capsule.addView(statusTxt)
-        capsule.addView(subTxt)
-
-        val orbBg = GradientDrawable().apply {
+        val bg = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
-            setColor(Color.argb(215, 11, 16, 28))
-            setStroke(dp(1.5f), Color.parseColor("#AA00F0FF"))
+            setColor(Color.parseColor("#CC070B14"))
+            setStroke((2 * resources.displayMetrics.density).toInt(), Color.parseColor("#38BDF8"))
         }
 
-        val badge = TextView(this).apply {
+        val tv = TextView(this).apply {
             text = "ẞ"
-            setTextColor(Color.parseColor("#00F0FF"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+            textSize = 21f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.parseColor("#38BDF8"))
             gravity = Gravity.CENTER
-            background = orbBg
-            alpha = idleAlpha
+            background = bg
+            alpha = baseIdleAlpha
+            elevation = 14f
         }
 
-        val orbSize = dp(46f)
-        val orbParams = LinearLayout.LayoutParams(orbSize, orbSize).apply {
-            marginStart = dp(8f)
-        }
-
-        val capParams = LinearLayout.LayoutParams(dp(230f), LinearLayout.LayoutParams.WRAP_CONTENT)
-        container.addView(capsule, capParams)
-        container.addView(badge, orbParams)
-
-        val typeFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
             @Suppress("DEPRECATION")
@@ -737,53 +797,84 @@ class VortexFloatingService : Service() {
         }
 
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            typeFlag,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            sizePx,
+            sizePx,
+            type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.END
-            x = 12
-            y = 300
+            gravity = Gravity.TOP or Gravity.START
+            x = savedX
+            y = savedY
         }
 
         var initialX = 0
         var initialY = 0
-        var initialTouchX = 0f
-        var initialTouchY = 0f
+        var touchX = 0f
+        var touchY = 0f
         var moved = false
+        var lastTapTime = 0L
+        var longPressTriggered = false
 
-        badge.setOnTouchListener { _, event ->
+        val longPressRunnable = Runnable {
+            if (!moved) {
+                longPressTriggered = true
+                vibrateShort(28L)
+                pulseOrbTemporarily(1.0f, 2200L)
+                VortexBridgeModule.emitJsEvent("VortexOrbAction", "LONG_PRESS_SCAN")
+            }
+        }
+
+        tv.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    badge.alpha = 1.0f
                     initialX = params.x
                     initialY = params.y
-                    initialTouchX = event.rawX
-                    initialTouchY = event.rawY
+                    touchX = event.rawX
+                    touchY = event.rawY
                     moved = false
+                    longPressTriggered = false
+                    mainHandler.removeCallbacks(dimRunnable)
+                    tv.alpha = 1.0f
+                    mainHandler.postDelayed(longPressRunnable, 550L)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = (initialTouchX - event.rawX).toInt()
-                    val dy = (event.rawY - initialTouchY).toInt()
-                    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+                    val dx = (event.rawX - touchX).toInt()
+                    val dy = (event.rawY - touchY).toInt()
+                    if (kotlin.math.abs(dx) > 12 || kotlin.math.abs(dy) > 12) {
                         moved = true
-                        params.x = (initialX + dx).coerceAtLeast(0)
-                        params.y = (initialY + dy).coerceAtLeast(0)
-                        try {
-                            wm.updateViewLayout(container, params)
-                        } catch (_: Exception) {}
+                        mainHandler.removeCallbacks(longPressRunnable)
+                        params.x = (initialX + dx).coerceIn(0, screenWidth - sizePx)
+                        params.y = (initialY + dy).coerceIn(40, screenHeight - sizePx - 40)
+                        windowManager.updateViewLayout(tv, params)
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!moved) {
-                        onOrbTapped()
-                    } else if (!isCapsuleExpanded) {
-                        badge.animate().alpha(idleAlpha).setDuration(250).start()
+                    mainHandler.removeCallbacks(longPressRunnable)
+                    if (moved) {
+                        val snapX = if (params.x + sizePx / 2 < screenWidth / 2) 18 else (screenWidth - sizePx - 18)
+                        params.x = snapX
+                        windowManager.updateViewLayout(tv, params)
+                        prefs.edit().putInt("orb_x", snapX).putInt("orb_y", params.y).apply()
+                        scheduleDim()
+                    } else if (!longPressTriggered) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastTapTime < 310L) {
+                            lastTapTime = 0L
+                            vibrateShort(20L)
+                            startZeroBeepListen()
+                            VortexBridgeModule.emitJsEvent("VortexOrbAction", "DOUBLE_TAP_VOICE")
+                        } else {
+                            lastTapTime = now
+                            mainHandler.postDelayed({
+                                if (lastTapTime != 0L) {
+                                    lastTapTime = 0L
+                                    toggleCapsule()
+                                }
+                            }, 320L)
+                        }
                     }
                     true
                 }
@@ -791,262 +882,275 @@ class VortexFloatingService : Service() {
             }
         }
 
-        capsule.setOnClickListener {
-            startListeningLoop(true)
+        orbView = tv
+        orbParams = params
+        windowManager.addView(tv, params)
+    }
+
+    private fun createGlassCapsule() {
+        val density = resources.displayMetrics.density
+        val cardW = (screenWidth * 0.86f).toInt().coerceAtMost((360 * density).toInt())
+
+        val cardBg = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 22 * density
+            setColor(Color.parseColor("#EE080C15"))
+            setStroke((1.5f * density).toInt(), Color.parseColor("#38BDF8"))
         }
 
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = cardBg
+            setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (14 * density).toInt())
+            visibility = View.GONE
+            elevation = 20f
+        }
+
+        val titleTv = TextView(this).apply {
+            text = "VORTEX ẞ • AUTONOMOUS HUD"
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.parseColor("#38BDF8"))
+        }
+
+        val bodyTv = TextView(this).apply {
+            text = "Tap SCAN to read screen & inject code, or MIC for zero-beep voice."
+            textSize = 15f
+            setTextColor(Color.parseColor("#F1F5F9"))
+            setPadding(0, (8 * density).toInt(), 0, (12 * density).toInt())
+            maxLines = 8
+        }
+
+        val btnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        fun makeActionChip(label: String, strokeHex: String, textHex: String, onClick: () -> Unit): TextView {
+            val chipBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 12 * density
+                setColor(Color.parseColor("#131B2E"))
+                setStroke((1 * density).toInt(), Color.parseColor(strokeHex))
+            }
+            return TextView(this).apply {
+                text = label
+                textSize = 12.5f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.parseColor(textHex))
+                gravity = Gravity.CENTER
+                background = chipBg
+                setPadding((12 * density).toInt(), (7 * density).toInt(), (12 * density).toInt(), (7 * density).toInt())
+                val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginEnd = (6 * density).toInt()
+                }
+                layoutParams = lp
+                setOnClickListener { onClick() }
+            }
+        }
+
+        btnRow.addView(makeActionChip("SCAN", "#38BDF8", "#38BDF8") {
+            updateHud("VORTEX VISION", "Scanning screen & DOM...", true)
+            VortexBridgeModule.emitJsEvent("VortexOrbAction", "CAPSULE_SCAN")
+        })
+
+        btnRow.addView(makeActionChip("MIC", "#34D399", "#34D399") {
+            updateHud("VORTEX VOICE", "Listening silently...", true)
+            startZeroBeepListen()
+        })
+
+        btnRow.addView(makeActionChip("INJECT", "#A78BFA", "#A78BFA") {
+            VortexBridgeModule.emitJsEvent("VortexOrbAction", "CAPSULE_INJECT")
+        })
+
+        btnRow.addView(makeActionChip("HIDE", "#64748B", "#CBD5E1") {
+            hideCapsule()
+        })
+
+        container.addView(titleTv)
+        container.addView(bodyTv)
+        container.addView(btnRow)
+
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
+        val params = WindowManager.LayoutParams(
+            cardW,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            y = (90 * density).toInt()
+        }
+
+        capsuleView = container
+        capsuleTitleView = titleTv
+        capsuleBodyView = bodyTv
+        capsuleParams = params
+        windowManager.addView(container, params)
+    }
+
+    fun toggleCapsule() {
+        if (isCapsuleOpen) hideCapsule() else showCapsule()
+    }
+
+    fun showCapsule() {
+        isCapsuleOpen = true
+        mainHandler.removeCallbacks(dimRunnable)
+        orbView?.alpha = 1.0f
+        capsuleView?.visibility = View.VISIBLE
+    }
+
+    fun hideCapsule() {
+        isCapsuleOpen = false
+        capsuleView?.visibility = View.GONE
+        scheduleDim()
+    }
+
+    fun updateHud(title: String, body: String, openCapsule: Boolean) {
+        mainHandler.post {
+            capsuleTitleView?.text = title
+            capsuleBodyView?.text = body
+            if (openCapsule) {
+                showCapsule()
+            } else {
+                pulseOrbTemporarily(0.95f, 2000L)
+            }
+        }
+    }
+
+    fun setIdleAlpha(newAlpha: Float) {
+        baseIdleAlpha = newAlpha.coerceIn(0.15f, 1.0f)
+        mainHandler.post {
+            if (!isCapsuleOpen && !isListeningNative) {
+                orbView?.alpha = baseIdleAlpha
+            }
+        }
+    }
+
+    fun pulseOrbTemporarily(peakAlpha: Float, holdMs: Long) {
+        mainHandler.post {
+            mainHandler.removeCallbacks(dimRunnable)
+            orbView?.animate()?.alpha(peakAlpha)?.setDuration(180)?.start()
+            mainHandler.postDelayed(dimRunnable, holdMs)
+        }
+    }
+
+    private fun scheduleDim() {
+        mainHandler.removeCallbacks(dimRunnable)
+        mainHandler.postDelayed(dimRunnable, 2400L)
+    }
+
+    private fun vibrateShort(ms: Long) {
         try {
-            wm.addView(container, params)
-            rootContainer = container
-            orbView = badge
-            hudCapsule = capsule
-            hudStatusText = statusTxt
-            hudSubText = subTxt
-            layoutParams = params
+            @Suppress("DEPRECATION")
+            val vib = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vib?.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vib?.vibrate(ms)
+            }
         } catch (_: Exception) {}
     }
 
-    private fun onOrbTapped() {
-        if (isCapsuleExpanded) {
-            collapseCapsule()
-        } else {
-            expandCapsule("VORTEX ẞ  ⊕  ACTIVE", "Listening for command...")
-            startListeningLoop(true)
-        }
-    }
-
-    private fun expandCapsule(title: String, subtitle: String) {
-        mainHandler.post {
-            isCapsuleExpanded = true
-            orbView?.alpha = 1.0f
-            hudStatusText?.text = title
-            hudSubText?.text = subtitle
-            hudCapsule?.visibility = View.VISIBLE
-            try {
-                if (rootContainer != null && layoutParams != null) {
-                    windowManager?.updateViewLayout(rootContainer, layoutParams)
-                }
-            } catch (_: Exception) {}
-        }
-    }
-
-    private fun collapseCapsule() {
-        mainHandler.post {
-            isCapsuleExpanded = false
-            isActiveCommandMode = false
-            hudCapsule?.visibility = View.GONE
-            orbView?.animate()?.alpha(idleAlpha)?.setDuration(250)?.start()
-            try {
-                if (rootContainer != null && layoutParams != null) {
-                    windowManager?.updateViewLayout(rootContainer, layoutParams)
-                }
-            } catch (_: Exception) {}
-        }
-    }
-
-    private fun showHudMessage(title: String, detail: String, autoHideMs: Long) {
-        expandCapsule(title, detail)
-        if (autoHideMs > 0L) {
+    fun duckSystemBeepStreams(durationMs: Long) {
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+            am.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_MUTE, 0)
+            am.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_MUTE, 0)
             mainHandler.postDelayed({
-                if (!isActiveCommandMode) {
-                    collapseCapsule()
-                }
-            }, autoHideMs)
-        }
+                try {
+                    am.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_UNMUTE, 0)
+                    am.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_UNMUTE, 0)
+                } catch (_: Exception) {}
+            }, durationMs.coerceIn(150L, 1200L))
+        } catch (_: Exception) {}
     }
 
-    private fun hasMicPermission(): Boolean {
-        return checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-    }
-
-    private fun startListeningLoop(activeCommand: Boolean) {
-        if (!hasMicPermission()) {
-            if (activeCommand) {
-                showHudMessage("VORTEX ẞ  ⊗  MIC LOCKED", "Open Vortex app once to grant Mic", 3500L)
-            }
-            return
-        }
+    fun startZeroBeepListen() {
         mainHandler.post {
+            if (!SpeechRecognizer.isRecognitionAvailable(this)) return@post
             try {
-                isActiveCommandMode = activeCommand
-                if (speechRecognizer == null) {
-                    speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-                    speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+                duckSystemBeepStreams(420L)
+                speechRecognizer?.destroy()
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+                    setRecognitionListener(object : RecognitionListener {
                         override fun onReadyForSpeech(params: Bundle?) {
-                            if (isActiveCommandMode) {
-                                expandCapsule("VORTEX ẞ  ◈  LISTENING", "Speak your command now...")
-                            }
+                            isListeningNative = true
+                            orbView?.alpha = 1.0f
                         }
                         override fun onBeginningOfSpeech() {}
                         override fun onRmsChanged(rmsdB: Float) {}
                         override fun onBufferReceived(buffer: ByteArray?) {}
-                        override fun onEndOfSpeech() {}
-
-                        override fun onPartialResults(partialResults: Bundle?) {
-                            val list = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                            val text = list?.firstOrNull()?.trim() ?: return
-                            if (text.isEmpty()) return
-                            if (isActiveCommandMode) {
-                                hudSubText?.text = text
-                            } else if (text.lowercase().contains("vortex")) {
-                                isActiveCommandMode = true
-                                expandCapsule("VORTEX ẞ  ⊕  WAKEWORD", text)
-                            }
+                        override fun onEndOfSpeech() {
+                            duckSystemBeepStreams(320L)
                         }
-
-                        override fun onResults(results: Bundle?) {
-                            val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                            val spoken = list?.firstOrNull()?.trim() ?: ""
-                            if (spoken.isNotEmpty()) {
-                                val lower = spoken.lowercase()
-                                if (isActiveCommandMode || lower.contains("vortex")) {
-                                    val cleaned = spoken
-                                        .replace("hey vortex", "", ignoreCase = true)
-                                        .replace("vortex", "", ignoreCase = true)
-                                        .trim()
-                                    if (cleaned.isEmpty()) {
-                                        expandCapsule("VORTEX ẞ  ⊕  YES?", "Listening for command...")
-                                        mainHandler.postDelayed({ startListeningLoop(true) }, 250L)
-                                        return
-                                    }
-                                    expandCapsule("VORTEX ẞ  ⟁  EXECUTING", cleaned)
-                                    VortexBridgeModule.emitJsEvent("VortexWakeCommand", cleaned)
-                                    isActiveCommandMode = false
-                                    mainHandler.postDelayed({ startListeningLoop(false) }, 1500L)
-                                    return
-                                }
-                            }
-                            isActiveCommandMode = false
-                            mainHandler.postDelayed({ startListeningLoop(false) }, 400L)
-                        }
-
                         override fun onError(error: Int) {
-                            if (isActiveCommandMode) {
-                                showHudMessage("VORTEX ẞ  ≡  STANDBY", "Tap ẞ or say Vortex", 2200L)
-                            }
-                            isActiveCommandMode = false
-                            if (isRunning) {
-                                mainHandler.postDelayed({ startListeningLoop(false) }, 700L)
+                            isListeningNative = false
+                            duckSystemBeepStreams(300L)
+                            scheduleDim()
+                            if (micMode == "native_silent") {
+                                mainHandler.postDelayed({ startZeroBeepListen() }, 950L)
                             }
                         }
-
+                        override fun onResults(results: Bundle?) {
+                            isListeningNative = false
+                            duckSystemBeepStreams(280L)
+                            scheduleDim()
+                            val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                            val heard = matches?.firstOrNull()?.trim() ?: ""
+                            if (heard.isNotEmpty()) {
+                                VortexBridgeModule.emitJsEvent("VortexVoiceTranscript", heard)
+                            }
+                            if (micMode == "native_silent") {
+                                mainHandler.postDelayed({ startZeroBeepListen() }, 750L)
+                            }
+                        }
+                        override fun onPartialResults(partialResults: Bundle?) {}
                         override fun onEvent(eventType: Int, params: Bundle?) {}
                     })
                 }
-
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 }
-                speechRecognizer?.cancel()
                 speechRecognizer?.startListening(intent)
             } catch (_: Exception) {
-                isActiveCommandMode = false
+                isListeningNative = false
             }
         }
-    }
-
-    private fun destroySpeech() {
-        mainHandler.post {
-            try {
-                speechRecognizer?.destroy()
-                speechRecognizer = null
-            } catch (_: Exception) {}
-        }
-    }
-
-    private fun removeFloatingOrb() {
-        try {
-            if (rootContainer != null) {
-                windowManager?.removeView(rootContainer)
-                rootContainer = null
-                orbView = null
-                hudCapsule = null
-            }
-        } catch (_: Exception) {}
     }
 }
 `
       );
 
+      // 4. VortexNotificationListener.kt (Live Notification Reader + Direct WhatsApp/App RemoteInput Reply)
       writeFileIfChanged(
-        path.join(pkgPath, 'VortexQuickTileService.kt'),
-        `package com.vortex.app
-
-import android.content.Intent
-import android.os.Build
-import android.provider.Settings
-import android.service.quicksettings.Tile
-import android.service.quicksettings.TileService
-import androidx.annotation.RequiresApi
-
-@RequiresApi(Build.VERSION_CODES.N)
-class VortexQuickTileService : TileService() {
-
-    override fun onStartListening() {
-        super.onStartListening()
-        qsTile?.apply {
-            state = if (VortexFloatingService.isRunning) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-            label = "Vortex ẞ"
-            updateTile()
-        }
-    }
-
-    override fun onClick() {
-        super.onClick()
-        if (!Settings.canDrawOverlays(this)) {
-          val intent = Intent(this, MainActivity::class.java).apply {
-              flags = Intent.FLAG_ACTIVITY_NEW_TASK
-          }
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-              val pi = android.app.PendingIntent.getActivity(
-                  this,
-                  1,
-                  intent,
-                  android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
-              )
-              startActivityAndCollapse(pi)
-          } else {
-              @Suppress("DEPRECATION")
-              startActivityAndCollapse(intent)
-          }
-          return
-      }
-
-
-        if (VortexFloatingService.isRunning) {
-            val stopIntent = Intent(this, VortexFloatingService::class.java).apply {
-                action = VortexFloatingService.ACTION_STOP
-            }
-            startService(stopIntent)
-            qsTile?.state = Tile.STATE_INACTIVE
-        } else {
-            val startIntent = Intent(this, VortexFloatingService::class.java).apply {
-                action = VortexFloatingService.ACTION_START
-                putExtra("idleAlpha", 0.10f)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(startIntent)
-            } else {
-                startService(startIntent)
-            }
-            qsTile?.state = Tile.STATE_ACTIVE
-        }
-        qsTile?.updateTile()
-    }
-}
-`
-      );
-
-			      writeFileIfChanged(
         path.join(pkgPath, 'VortexNotificationListener.kt'),
         `package com.vortex.app
 
+import android.app.Notification
+import android.app.RemoteInput
+import android.content.Intent
+import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 
 class VortexNotificationListener : NotificationListenerService() {
+
     companion object {
         @Volatile
         var instance: VortexNotificationListener? = null
@@ -1056,6 +1160,9 @@ class VortexNotificationListener : NotificationListenerService() {
 
         @Volatile
         var lastNotificationSummary: String = ""
+
+        val activeSbnMap = ConcurrentHashMap<String, StatusBarNotification>()
+        val recentFeed = CopyOnWriteArrayList<String>()
     }
 
     override fun onListenerConnected() {
@@ -1071,509 +1178,649 @@ class VortexNotificationListener : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        val pkg = sbn?.packageName ?: return
+        if (sbn == null) return
+        val pkg = sbn.packageName ?: return
+        if (pkg == packageName) return
         val extras = sbn.notification?.extras ?: return
-        val title = extras.getCharSequence("android.title")?.toString() ?: ""
-        val text = extras.getCharSequence("android.text")?.toString() ?: ""
-        if (title.isNotEmpty() || text.isNotEmpty()) {
-            lastNotificationSummary  = "$pkg: $title - $text"
+        val title = extras.getCharSequence("android.title")?.toString()?.trim() ?: ""
+        val text = extras.getCharSequence("android.text")?.toString()?.trim() ?: ""
+        if (title.isEmpty() && text.isEmpty()) return
+
+        activeSbnMap[sbn.key] = sbn
+        lastNotificationSummary = pkg + ": " + title + " - " + text
+
+        val canReply = hasRemoteInput(sbn.notification)
+        val item = JSONObject().apply {
+            put("key", sbn.key)
+            put("pkg", pkg)
+            put("title", title.take(80))
+            put("text", text.take(220))
+            put("time", sbn.postTime)
+            put("canReply", canReply)
         }
+        recentFeed.add(0, item.toString())
+        while (recentFeed.size > 25) {
+            recentFeed.removeAt(recentFeed.size - 1)
+        }
+
+        if (canReply) {
+            VortexBridgeModule.emitJsEvent("VortexIncomingMessage", item.toString())
+        }
+    }
+
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        if (sbn != null) {
+            activeSbnMap.remove(sbn.key)
+        }
+    }
+
+    private fun hasRemoteInput(notification: Notification?): Boolean {
+        val actions = notification?.actions ?: return false
+        return actions.any { act ->
+            val ri = act.remoteInputs
+            ri != null && ri.isNotEmpty()
+        }
+    }
+
+    fun replyToTarget(targetQuery: String, replyMessage: String): Boolean {
+        val needle = targetQuery.trim().lowercase()
+        for (sbn in activeSbnMap.values) {
+            val extras = sbn.notification?.extras ?: continue
+            val title = extras.getCharSequence("android.title")?.toString()?.lowercase() ?: ""
+            val text = extras.getCharSequence("android.text")?.toString()?.lowercase() ?: ""
+            val pkg = sbn.packageName?.lowercase() ?: ""
+
+            if (needle.isEmpty() || title.contains(needle) || text.contains(needle) || pkg.contains(needle)) {
+                val actions = sbn.notification?.actions ?: continue
+                for (action in actions) {
+                    val remoteInputs = action.remoteInputs
+                    if (remoteInputs != null && remoteInputs.isNotEmpty()) {
+                        try {
+                            val replyIntent = Intent()
+                            val bundle = Bundle()
+                            for (ri in remoteInputs) {
+                                bundle.putCharSequence(ri.resultKey, replyMessage)
+                            }
+                            RemoteInput.addResultsToIntent(remoteInputs, replyIntent, bundle)
+                            action.actionIntent.send(this, 0, replyIntent)
+                            return true
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    fun getFeedJson(): String {
+        val arr = JSONArray()
+        for (raw in recentFeed) {
+            try {
+                arr.put(JSONObject(raw))
+            } catch (_: Exception) {}
+        }
+        return arr.toString()
+    }
+}
+`
+      );
+
+      // 5. VortexQuickTileService.kt & VortexBootReceiver.kt
+      writeFileIfChanged(
+        path.join(pkgPath, 'VortexQuickTileService.kt'),
+        `package com.vortex.app
+
+import android.content.Intent
+import android.os.Build
+import android.service.quicksettings.Tile
+import android.service.quicksettings.TileService
+
+class VortexQuickTileService : TileService() {
+
+    override fun onStartListening() {
+        super.onStartListening()
+        qsTile?.state = if (VortexFloatingService.isRunning) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+        qsTile?.updateTile()
+    }
+
+    override fun onClick() {
+        super.onClick()
+        val intent = Intent(this, VortexFloatingService::class.java)
+        if (VortexFloatingService.isRunning) {
+            stopService(intent)
+            qsTile?.state = Tile.STATE_INACTIVE
+        } else {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+            qsTile?.state = Tile.STATE_ACTIVE
+        }
+        qsTile?.updateTile()
     }
 }
 `
       );
 
       writeFileIfChanged(
+        path.join(pkgPath, 'VortexBootReceiver.kt'),
+        `package com.vortex.app
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
+
+class VortexBootReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent?) {
+        val action = intent?.action ?: return
+        if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            val prefs = context.getSharedPreferences("vortex_prefs", Context.MODE_PRIVATE)
+            val enabled = prefs.getBoolean("orb_enabled", true)
+            if (enabled && Settings.canDrawOverlays(context)) {
+                val svc = Intent(context, VortexFloatingService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(svc)
+                } else {
+                    context.startService(svc)
+                }
+            }
+        }
+    }
+}
+`
+      );
+
+      // 6. VortexBridgeModule.kt (Complete Native Bridge with Companion.reactCtx Fix)
+      writeFileIfChanged(
         path.join(pkgPath, 'VortexBridgeModule.kt'),
         `package com.vortex.app
 
-import android.content.ComponentName
+import android.app.ActivityManager
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
+import android.hardware.camera2.CameraManager
 import android.net.Uri
+import android.os.BatteryManager
 import android.os.Build
+import android.os.Environment
+import android.os.StatFs
+import android.provider.ContactsContract
 import android.provider.Settings
+import android.telephony.SmsManager
 import android.text.TextUtils
-import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.modules.core.DeviceEventManagerModule
-import android.content.Context
-import android.app.ActivityManager
-import android.hardware.camera2.CameraManager
-import android.os.Environment
-import android.os.PowerManager
-import android.os.StatFs
-import java.io.File
+import org.json.JSONArray
+import org.json.JSONObject
 
-class VortexBridgeModule(private val reactCtx: ReactApplicationContext) :
-    ReactContextBaseJavaModule(reactCtx) {
+class VortexBridgeModule(private val appContext: ReactApplicationContext) :
+    ReactContextBaseJavaModule(appContext) {
 
-      companion object {
-      @Volatile
-      var reactCtx: ReactApplicationContext? = null
+    companion object {
+        @Volatile
+        var reactCtx: ReactApplicationContext? = null
 
-      fun emitJsEvent(eventName: String, payload: String) {
-          try {
-              reactCtx
-                  ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-                  ?.emit(eventName, payload)
-          } catch (_: Exception) {}
-      }
-  }
+        fun emitJsEvent(eventName: String, payload: String) {
+            try {
+                reactCtx
+                    ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                    ?.emit(eventName, payload)
+            } catch (_: Exception) {}
+        }
+    }
 
-  init {
-      Companion.reactCtx = reactCtx
-  }
-  
+    init {
+        Companion.reactCtx = appContext
+    }
+
     override fun getName(): String = "VortexBridge"
 
     @ReactMethod
-    fun getInstalledApps(promise: Promise) {
-        try {
-            val pm = reactCtx.packageManager
-            val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
-                addCategory(Intent.CATEGORY_LAUNCHER)
-            }
-            val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                pm.queryIntentActivities(mainIntent, PackageManager.ResolveInfoFlags.of(0L))
-            } else {
-                @Suppress("DEPRECATION")
-                pm.queryIntentActivities(mainIntent, 0)
-            }
-
-            val arr = Arguments.createArray()
-            val seenPkgs = HashSet<String>()
-            for (ri in resolveInfos) {
-                val pkg = ri.activityInfo?.packageName ?: continue
-                if (!seenPkgs.add(pkg)) continue
-                val label = ri.loadLabel(pm)?.toString()?.trim() ?: pkg
-                val item = Arguments.createMap().apply {
-                    putString("label", label)
-                    putString("packageName", pkg)
-                }
-                arr.pushMap(item)
-            }
-            promise.resolve(arr)
-        } catch (e: Exception) {
-            promise.reject("APPS_LIST_ERROR", e.message, e)
-        }
-    }
+    fun addListener(eventName: String) {}
 
     @ReactMethod
-    fun openAppByName(rawQuery: String, promise: Promise) {
-        try {
-            val query = rawQuery.trim().lowercase()
-            if (query.isEmpty()) {
-                promise.resolve("")
-                return
-            }
-
-            val pm = reactCtx.packageManager
-
-            // Direct package name match if user passed com.xxx.yyy
-            if (query.contains(".")) {
-                val directIntent = pm.getLaunchIntentForPackage(rawQuery.trim())
-                if (directIntent != null) {
-                    directIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    reactCtx.startActivity(directIntent)
-                    promise.resolve(rawQuery.trim())
-                    return
-                }
-            }
-
-            val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
-                addCategory(Intent.CATEGORY_LAUNCHER)
-            }
-            val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                pm.queryIntentActivities(mainIntent, PackageManager.ResolveInfoFlags.of(0L))
-            } else {
-                @Suppress("DEPRECATION")
-                pm.queryIntentActivities(mainIntent, 0)
-            }
-
-            var bestPkg: String? = null
-            var bestLabel: String? = null
-            var bestScore = -1
-
-            for (ri in resolveInfos) {
-                val pkg = ri.activityInfo?.packageName ?: continue
-                val label = ri.loadLabel(pm)?.toString()?.trim() ?: continue
-                val lLower = label.lowercase()
-                val pLower = pkg.lowercase()
-
-                val score = when {
-                    lLower == query -> 100
-                    lLower.startsWith(query) -> 85
-                    lLower.contains(query) -> 70
-                    pLower.contains(query) -> 55
-                    else -> -1
-                }
-
-                if (score > bestScore) {
-                    bestScore = score
-                    bestPkg = pkg
-                    bestLabel = label
-                }
-            }
-
-            if (bestPkg != null) {
-                val launchIntent = pm.getLaunchIntentForPackage(bestPkg)
-                if (launchIntent != null) {
-                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    reactCtx.startActivity(launchIntent)
-                    promise.resolve("$bestLabel ($bestPkg)")
-                    return
-                }
-            }
-
-            promise.resolve("")
-        } catch (e: Exception) {
-            promise.reject("OPEN_APP_ERROR", e.message, e)
-        }
-    }
+    fun removeListeners(count: Int) {}
 
     @ReactMethod
-    fun startFloatingOrb(idleAlpha: Double, promise: Promise) {
+    fun startFloatingOrb(promise: Promise) {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(reactCtx)) {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:" + reactCtx.packageName)
-                ).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                reactCtx.startActivity(intent)
-                promise.resolve("overlay_permission_requested")
+            if (!Settings.canDrawOverlays(appContext)) {
+                promise.resolve(false)
                 return
             }
-
-            val alphaFloat = idleAlpha.toFloat().coerceIn(0.05f, 1.0f)
-            val intent = Intent(reactCtx, VortexFloatingService::class.java).apply {
-                action = VortexFloatingService.ACTION_START
-                putExtra("idleAlpha", alphaFloat)
-            }
+            val intent = Intent(appContext, VortexFloatingService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                reactCtx.startForegroundService(intent)
+                appContext.startForegroundService(intent)
             } else {
-                reactCtx.startService(intent)
+                appContext.startService(intent)
             }
-            promise.resolve("orb_started")
+            promise.resolve(true)
         } catch (e: Exception) {
-            promise.reject("ORB_ERROR", e.message, e)
+            promise.reject("ORB_ERR", e.message)
         }
     }
 
     @ReactMethod
     fun stopFloatingOrb(promise: Promise) {
         try {
-            val intent = Intent(reactCtx, VortexFloatingService::class.java).apply {
-                action = VortexFloatingService.ACTION_STOP
-            }
-            reactCtx.startService(intent)
-            promise.resolve("orb_stopped")
+            appContext.getSharedPreferences("vortex_prefs", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("orb_enabled", false)
+                .apply()
+            appContext.stopService(Intent(appContext, VortexFloatingService::class.java))
+            promise.resolve(true)
         } catch (e: Exception) {
-            promise.reject("ORB_STOP_ERROR", e.message, e)
+            promise.reject("ORB_STOP_ERR", e.message)
         }
     }
 
     @ReactMethod
-    fun setOrbIdleAlpha(idleAlpha: Double, promise: Promise) {
-        try {
-            val intent = Intent(reactCtx, VortexFloatingService::class.java).apply {
-                action = VortexFloatingService.ACTION_SET_OPACITY
-                putExtra("idleAlpha", idleAlpha.toFloat().coerceIn(0.05f, 1.0f))
-            }
-            reactCtx.startService(intent)
-            promise.resolve("alpha_updated")
-        } catch (e: Exception) {
-            promise.reject("ALPHA_ERROR", e.message, e)
-        }
+    fun setOrbOpacity(alpha: Double, promise: Promise) {
+        VortexFloatingService.instance?.setIdleAlpha(alpha.toFloat())
+        VortexFloatingService.baseIdleAlpha = alpha.toFloat().coerceIn(0.15f, 1.0f)
+        promise.resolve(true)
     }
 
     @ReactMethod
-    fun getServiceStatuses(promise: Promise) {
-        val map = Arguments.createMap()
-        val overlayGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(reactCtx)
+    fun updateFloatingHud(title: String, body: String, openCapsule: Boolean, promise: Promise) {
+        VortexFloatingService.instance?.updateHud(title, body, openCapsule)
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun setMicMode(mode: String, promise: Promise) {
+        VortexFloatingService.micMode = mode
+        if (mode == "native_silent") {
+            VortexFloatingService.instance?.startZeroBeepListen()
+        }
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun triggerZeroBeepListen(promise: Promise) {
+        val svc = VortexFloatingService.instance
+        if (svc != null) {
+            svc.startZeroBeepListen()
+            promise.resolve(true)
         } else {
-            true
+            promise.resolve(false)
         }
-        val accEnabled = isAccessibilityServiceEnabled()
-        val notifEnabled = isNotificationListenerEnabled()
+    }
 
-        map.putBoolean("overlayGranted", overlayGranted)
-        map.putBoolean("orbRunning", VortexFloatingService.isRunning)
-        map.putBoolean("accessibilityEnabled", accEnabled)
-        map.putBoolean("notificationListenerEnabled", notifEnabled)
-        map.putString("activePackage", VortexAccessibilityService.activePackage)
-        map.putString("lastNotification", VortexNotificationListener.lastNotificationSummary)
-        promise.resolve(map)
+    @ReactMethod
+    fun muteSystemBeepsTemporarily(durationMs: Int, promise: Promise) {
+        VortexFloatingService.instance?.duckSystemBeepStreams(durationMs.toLong())
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun isAccessibilityEnabled(promise: Promise) {
+        try {
+            val expected = appContext.packageName + "/" + VortexAccessibilityService::class.java.canonicalName
+            val enabledServices = Settings.Secure.getString(
+                appContext.contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: ""
+            val splitter = TextUtils.SimpleStringSplitter(':')
+            splitter.setString(enabledServices)
+            var found = VortexAccessibilityService.instance != null
+            while (splitter.hasNext()) {
+                if (splitter.next().equals(expected, ignoreCase = true)) {
+                    found = true
+                    break
+                }
+            }
+            promise.resolve(found)
+        } catch (_: Exception) {
+            promise.resolve(false)
+        }
     }
 
     @ReactMethod
     fun openAccessibilitySettings(promise: Promise) {
+        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        appContext.startActivity(intent)
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun canDrawOverlays(promise: Promise) {
+        promise.resolve(Settings.canDrawOverlays(appContext))
+    }
+
+    @ReactMethod
+    fun openOverlaySettings(promise: Promise) {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:" + appContext.packageName)
+        ).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        appContext.startActivity(intent)
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun isNotificationListenerEnabled(promise: Promise) {
         try {
-            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            reactCtx.startActivity(intent)
-            promise.resolve(true)
-        } catch (e: Exception) {
-            promise.reject("ACC_SETTINGS_ERROR", e.message, e)
+            val flat = Settings.Secure.getString(
+                appContext.contentResolver,
+                "enabled_notification_listeners"
+            ) ?: ""
+            promise.resolve(flat.contains(appContext.packageName) || VortexNotificationListener.isConnected)
+        } catch (_: Exception) {
+            promise.resolve(false)
         }
     }
 
     @ReactMethod
-    fun openNotificationSettings(promise: Promise) {
+    fun openNotificationListenerSettings(promise: Promise) {
+        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        appContext.startActivity(intent)
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun captureScreenBase64(promise: Promise) {
+        val svc = VortexAccessibilityService.instance
+        if (svc == null) {
+            promise.resolve(null)
+            return
+        }
+        svc.captureSilentScreenshotBase64 { b64 ->
+            promise.resolve(b64)
+        }
+    }
+
+    @ReactMethod
+    fun dumpScreenDom(promise: Promise) {
+        val svc = VortexAccessibilityService.instance
+        if (svc == null) {
+            promise.resolve("[]")
+            return
+        }
+        promise.resolve(svc.dumpScreenDomJson())
+    }
+
+    @ReactMethod
+    fun humanTap(x: Double, y: Double, promise: Promise) {
+        val svc = VortexAccessibilityService.instance
+        promise.resolve(svc?.humanTap(x.toFloat(), y.toFloat()) ?: false)
+    }
+
+    @ReactMethod
+    fun humanSwipe(x1: Double, y1: Double, x2: Double, y2: Double, durationMs: Int, promise: Promise) {
+        val svc = VortexAccessibilityService.instance
+        promise.resolve(
+            svc?.humanSwipe(x1.toFloat(), y1.toFloat(), x2.toFloat(), y2.toFloat(), durationMs.toLong()) ?: false
+        )
+    }
+
+    @ReactMethod
+    fun clickNodeByQuery(query: String, promise: Promise) {
+        val svc = VortexAccessibilityService.instance
+        promise.resolve(svc?.clickNodeByQuery(query) ?: false)
+    }
+
+    @ReactMethod
+    fun injectTextToScreen(text: String, humanMode: Boolean, promise: Promise) {
+        val svc = VortexAccessibilityService.instance
+        promise.resolve(svc?.injectTextToEditable(text, humanMode) ?: false)
+    }
+
+    @ReactMethod
+    fun performGlobalActionByName(actionName: String, promise: Promise) {
+        val svc = VortexAccessibilityService.instance
+        promise.resolve(svc?.executeGlobalActionName(actionName) ?: false)
+    }
+
+    @ReactMethod
+    fun setLockLearningMode(enabled: Boolean, promise: Promise) {
+        VortexAccessibilityService.isLearningLock = enabled
+        if (enabled) {
+            VortexAccessibilityService.learnedLockBuffer = ""
+        }
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun replayPinNodes(pinCsv: String, promise: Promise) {
+        val svc = VortexAccessibilityService.instance
+        promise.resolve(svc?.replayPinNodes(pinCsv) ?: false)
+    }
+
+    @ReactMethod
+    fun drawPatternGesture(pointsCsv: String, promise: Promise) {
+        val svc = VortexAccessibilityService.instance
+        promise.resolve(svc?.drawPatternGesture(pointsCsv) ?: false)
+    }
+
+    @ReactMethod
+    fun getRecentNotifications(promise: Promise) {
+        val listener = VortexNotificationListener.instance
+        promise.resolve(listener?.getFeedJson() ?: "[]")
+    }
+
+    @ReactMethod
+    fun replyToNotification(targetQuery: String, replyMessage: String, promise: Promise) {
+        val listener = VortexNotificationListener.instance
+        promise.resolve(listener?.replyToTarget(targetQuery, replyMessage) ?: false)
+    }
+
+    @ReactMethod
+    fun getSystemTelemetry(promise: Promise) {
         try {
-            val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            reactCtx.startActivity(intent)
-            promise.resolve(true)
-        } catch (e: Exception) {
-            promise.reject("NOTIF_SETTINGS_ERROR", e.message, e)
-        }
-    }
+            val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val memInfo = ActivityManager.MemoryInfo()
+            am.getMemoryInfo(memInfo)
+            val freeRamMb = memInfo.availMem / (1024L * 1024L)
+            val totalRamMb = memInfo.totalMem / (1024L * 1024L)
 
-    @ReactMethod
-    fun readScreenText(promise: Promise) {
-        val svc = VortexAccessibilityService.instance
-        if (svc == null) {
-            promise.resolve("Accessibility Service off hai. System tab se on karo.")
-            return
-        }
-        promise.resolve(svc.readScreenSummary())
-    }
+            val stat = StatFs(Environment.getDataDirectory().path)
+            val freeStorageGb = (stat.availableBlocksLong * stat.blockSizeLong).toDouble() / (1024.0 * 1024.0 * 1024.0)
+            val totalStorageGb = (stat.blockCountLong * stat.blockSizeLong).toDouble() / (1024.0 * 1024.0 * 1024.0)
 
-    @ReactMethod
-    fun tapByText(target: String, promise: Promise) {
-        val svc = VortexAccessibilityService.instance
-        if (svc == null) {
-            promise.resolve(false)
-            return
-        }
-        svc.tapByText(target) { ok ->
-            promise.resolve(ok)
-        }
-    }
+            val bm = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+            val batteryPct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
 
-    @ReactMethod
-    fun swipeScreen(direction: String, promise: Promise) {
-        val svc = VortexAccessibilityService.instance
-        if (svc == null) {
-            promise.resolve(false)
-            return
-        }
-        svc.swipeDirection(direction) { ok ->
-            promise.resolve(ok)
-        }
-    }
-
-    @ReactMethod
-    fun typeText(text: String, promise: Promise) {
-        val svc = VortexAccessibilityService.instance
-        if (svc == null) {
-            promise.resolve(false)
-            return
-        }
-        promise.resolve(svc.typeIntoFocusedField(text))
-    }
-
-    @ReactMethod
-    fun pressBack(promise: Promise) {
-        val svc = VortexAccessibilityService.instance
-        promise.resolve(svc?.pressGlobalBack() ?: false)
-    }
-
-    @ReactMethod
-    fun pressHome(promise: Promise) {
-        val svc = VortexAccessibilityService.instance
-        promise.resolve(svc?.pressGlobalHome() ?: false)
-    }
-    
-      @ReactMethod
-  fun lockScreen(promise: Promise) {
-      val svc = VortexAccessibilityService.instance
-      promise.resolve(svc?.lockScreenNow() ?: false)
-  }
-
-  @ReactMethod
-  fun openPowerMenu(promise: Promise) {
-      val svc = VortexAccessibilityService.instance
-      promise.resolve(svc?.openPowerDialogNow() ?: false)
-  }
-
-  @ReactMethod
-  fun toggleSplitScreen(promise: Promise) {
-      val svc = VortexAccessibilityService.instance
-      promise.resolve(svc?.toggleSplitScreenNow() ?: false)
-  }
-
-  @ReactMethod
-  fun wakeScreen(promise: Promise) {
-      try {
-          val pm = reactApplicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager
-          @Suppress("DEPRECATION")
-          val wl = pm.newWakeLock(
-              PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-              "VortexBeta:WakeLock"
-          )
-          wl.acquire(3000L)
-          promise.resolve(true)
-      } catch (_: Exception) {
-          promise.resolve(false)
-      }
-  }
-
-  @ReactMethod
-  fun toggleTorch(enable: Boolean, promise: Promise) {
-      try {
-          val cm = reactApplicationContext.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-          val camId = cm.cameraIdList.firstOrNull()
-          if (camId != null) {
-              cm.setTorchMode(camId, enable)
-              promise.resolve(true)
-          } else {
-              promise.resolve(false)
-          }
-      } catch (_: Exception) {
-          promise.resolve(false)
-      }
-  }
-
-  @ReactMethod
-  fun drawPatternGesture(normalizedCoords: String, promise: Promise) {
-      val svc = VortexAccessibilityService.instance
-      if (svc == null) {
-          promise.resolve(false)
-          return
-      }
-      svc.drawGesturePath(normalizedCoords) { ok ->
-          promise.resolve(ok)
-      }
-  }
-
-  @ReactMethod
-  fun captureScreenBase64(promise: Promise) {
-      val svc = VortexAccessibilityService.instance
-      if (svc == null) {
-          promise.resolve("")
-          return
-      }
-      svc.captureSilentScreenshot { b64 ->
-          promise.resolve(b64 ?: "")
-      }
-  }
-
-  @ReactMethod
-  fun setLockLearningMode(enabled: Boolean, promise: Promise) {
-      VortexAccessibilityService.isLearningLock = enabled
-      if (enabled) {
-          VortexAccessibilityService.learnedLockBuffer = ""
-      }
-      promise.resolve(true)
-  }
-
-  @ReactMethod
-  fun updateFloatingHud(title: String, detail: String, autoHideMs: Double, promise: Promise) {
-      try {
-          val intent = Intent(reactApplicationContext, VortexFloatingService::class.java).apply {
-              action = VortexFloatingService.ACTION_UPDATE_HUD
-              putExtra("title", title)
-              putExtra("detail", detail)
-              putExtra("autoHideMs", autoHideMs.toLong())
-          }
-          reactApplicationContext.startService(intent)
-          promise.resolve(true)
-      } catch (_: Exception) {
-          promise.resolve(false)
-      }
-  }
-
-  @ReactMethod
-  fun getSystemTelemetry(promise: Promise) {
-      try {
-          val am = reactApplicationContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-          val memInfo = ActivityManager.MemoryInfo()
-          am.getMemoryInfo(memInfo)
-          val freeRamMb = memInfo.availMem / (1024L * 1024L)
-          val totalRamMb = memInfo.totalMem / (1024L * 1024L)
-
-          val stat = StatFs(Environment.getDataDirectory().path)
-          val freeStorageGb = (stat.availableBlocksLong * stat.blockSizeLong) / (1024.0 * 1024.0 * 1024.0)
-          val totalStorageGb = (stat.blockCountLong * stat.blockSizeLong) / (1024.0 * 1024.0 * 1024.0)
-
-            val obj = org.json.JSONObject()
+            val obj = JSONObject()
             obj.put("freeRamMb", freeRamMb)
             obj.put("totalRamMb", totalRamMb)
             obj.put("freeStorageGb", Math.round(freeStorageGb * 100.0) / 100.0)
             obj.put("totalStorageGb", Math.round(totalStorageGb * 100.0) / 100.0)
+            obj.put("batteryPct", batteryPct)
+            obj.put("activePackage", VortexAccessibilityService.activePackage)
             promise.resolve(obj.toString())
-
-      } catch (_: Exception) {
-                    promise.resolve("{}")
-      }
-  }
-
-  @ReactMethod
-  fun sweepJunkCache(promise: Promise) {
-      try {
-          var deletedBytes = 0L
-          fun cleanDir(dir: File?) {
-              if (dir == null || !dir.exists()) return
-              dir.listFiles()?.forEach { f ->
-                  if (f.isDirectory) {
-                      cleanDir(f)
-                      if (f.listFiles()?.isEmpty() == true) f.delete()
-                  } else {
-                      val size = f.length()
-                      if (f.delete()) deletedBytes += size
-                  }
-              }
-          }
-          cleanDir(reactApplicationContext.cacheDir)
-          cleanDir(reactApplicationContext.externalCacheDir)
-          System.gc()
-          val freedMb = String.format("%.2f", deletedBytes / (1024.0 * 1024.0))
-          promise.resolve(freedMb)
-      } catch (_: Exception) {
-          promise.resolve("0.00")
-      }
-  }
-  
-    private fun isAccessibilityServiceEnabled(): Boolean {
-        val expected = ComponentName(reactCtx, VortexAccessibilityService::class.java).flattenToString()
-        val enabledServices = Settings.Secure.getString(
-            reactCtx.contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: return false
-        val splitter = TextUtils.SimpleStringSplitter(':')
-        splitter.setString(enabledServices)
-        while (splitter.hasNext()) {
-            if (splitter.next().equals(expected, ignoreCase = true)) {
-                return true
-            }
+        } catch (_: Exception) {
+            promise.resolve("{}")
         }
-        return false
     }
 
-      private fun isNotificationListenerEnabled(): Boolean {
-        val pkgName = reactApplicationContext.packageName
-        val flat = Settings.Secure.getString(
-            reactApplicationContext.contentResolver,
-            "enabled_notification_listeners"
-        ) ?: return false
-        val target = "$pkgName/com.vortex.app.VortexNotificationListener"
-        return flat.contains(target)
+    @ReactMethod
+    fun sweepJunkCache(promise: Promise) {
+        try {
+            var freedBytes = 0L
+            appContext.cacheDir?.listFiles()?.forEach { file ->
+                freedBytes += file.length()
+                file.deleteRecursively()
+            }
+            appContext.externalCacheDir?.listFiles()?.forEach { file ->
+                freedBytes += file.length()
+                file.deleteRecursively()
+            }
+            val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val before = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.availMem
+            val pm = appContext.packageManager
+            val installed = pm.getInstalledApplications(0)
+            for (appInfo in installed) {
+                if (appInfo.packageName != appContext.packageName) {
+                    try {
+                        am.killBackgroundProcesses(appInfo.packageName)
+                    } catch (_: Exception) {}
+                }
+            }
+            val after = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.availMem
+            val reclaimedMb = ((after - before).coerceAtLeast(0L) + freedBytes) / (1024L * 1024L)
+            promise.resolve(reclaimedMb.toInt())
+        } catch (_: Exception) {
+            promise.resolve(0)
+        }
+    }
+
+    @ReactMethod
+    fun openAppStorageSettings(targetPackage: String, promise: Promise) {
+        try {
+            val intent = Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:" + targetPackage)
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            appContext.startActivity(intent)
+            promise.resolve(true)
+        } catch (_: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun toggleTorch(enable: Boolean, promise: Promise) {
+        try {
+            val cm = appContext.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val camId = cm.cameraIdList.firstOrNull() ?: return promise.resolve(false)
+            cm.setTorchMode(camId, enable)
+            promise.resolve(true)
+        } catch (_: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun launchAppByName(appName: String, promise: Promise) {
+        try {
+            val query = appName.trim().lowercase()
+            val pm = appContext.packageManager
+            val apps = pm.getInstalledApplications(0)
+            var matchedPkg: String? = null
+
+            for (info in apps) {
+                val label = pm.getApplicationLabel(info).toString().lowercase()
+                val pkg = info.packageName.lowercase()
+                if (label == query || pkg == query) {
+                    matchedPkg = info.packageName
+                    break
+                }
+                if (matchedPkg == null && (label.contains(query) || pkg.contains(query))) {
+                    if (pm.getLaunchIntentForPackage(info.packageName) != null) {
+                        matchedPkg = info.packageName
+                    }
+                }
+            }
+
+            if (matchedPkg != null) {
+                val launch = pm.getLaunchIntentForPackage(matchedPkg)
+                if (launch != null) {
+                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    appContext.startActivity(launch)
+                    promise.resolve(matchedPkg)
+                    return
+                }
+            }
+            promise.resolve(null)
+        } catch (_: Exception) {
+            promise.resolve(null)
+        }
+    }
+
+    @ReactMethod
+    fun makeDirectCall(phoneNumber: String, promise: Promise) {
+        try {
+            val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:" + phoneNumber.trim())).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            appContext.startActivity(intent)
+            promise.resolve(true)
+        } catch (_: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun sendDirectSms(phoneNumber: String, message: String, promise: Promise) {
+        try {
+            @Suppress("DEPRECATION")
+            val sms = SmsManager.getDefault()
+            sms.sendTextMessage(phoneNumber.trim(), null, message, null, null)
+            promise.resolve(true)
+        } catch (_: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun searchContacts(query: String, promise: Promise) {
+        val arr = JSONArray()
+        try {
+            val cursor = appContext.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER
+                ),
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " LIKE ?",
+                arrayOf("%" + query.trim() + "%"),
+                null
+            )
+            cursor?.use {
+                while (it.moveToNext() && arr.length() < 8) {
+                    val obj = JSONObject()
+                    obj.put("name", it.getString(0) ?: "")
+                    obj.put("number", it.getString(1) ?: "")
+                    arr.put(obj)
+                }
+            }
+        } catch (_: Exception) {}
+        promise.resolve(arr.toString())
+    }
+
+    @ReactMethod
+    fun copyToClipboardSilent(text: String, promise: Promise) {
+        try {
+            val cm = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            cm?.setPrimaryClip(ClipData.newPlainText("Vortex", text))
+            promise.resolve(true)
+        } catch (_: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun getClipboardText(promise: Promise) {
+        try {
+            val cm = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            val txt = cm?.primaryClip?.getItemAt(0)?.coerceToText(appContext)?.toString() ?: ""
+            promise.resolve(txt)
+        } catch (_: Exception) {
+            promise.resolve("")
+        }
     }
 }
 `
       );
 
+      // 7. VortexPackage.kt
       writeFileIfChanged(
         path.join(pkgPath, 'VortexPackage.kt'),
         `package com.vortex.app
@@ -1598,50 +1845,11 @@ class VortexPackage : ReactPackage {
       return cfg;
     },
   ]);
-}
-
-function withVortexMainApplication(config) {
-  return withMainApplication(config, (cfg) => {
-    let contents = cfg.modResults.contents;
-    if (!contents.includes('VortexPackage')) {
-      if (contents.includes('PackageList(this).packages.apply {')) {
-        contents = contents.replace(
-          'PackageList(this).packages.apply {',
-          'PackageList(this).packages.apply {\n              add(VortexPackage())'
-        );
-      } else if (contents.includes('val packages = PackageList(this).packages')) {
-        contents = contents.replace(
-          'val packages = PackageList(this).packages',
-          'val packages = PackageList(this).packages\n            packages.add(VortexPackage())'
-        );
-      }
-      cfg.modResults.contents = contents;
-    }
-    return cfg;
-  });
-}
-
-function withVortexGradle(config) {
-  return withGradleProperties(config, (cfg) => {
-    const props = cfg.modResults;
-    const setProp = (key, value) => {
-      const existing = props.find((p) => p.type === 'property' && p.key === key);
-      if (existing) {
-        existing.value = value;
-      } else {
-        props.push({ type: 'property', key, value });
-      }
-    };
-    setProp('android.useAndroidX', 'true');
-    setProp('android.enableJetifier', 'true');
-    return cfg;
-  });
-}
 
 module.exports = function withVortexNative(config) {
+  config = withVortexStrings(config);
   config = withVortexManifest(config);
-  config = withVortexNativeFiles(config);
-  config = withVortexMainApplication(config);
-  config = withVortexGradle(config);
+  config = withVortexMainApp(config);
+  config = withVortexKotlinFiles(config);
   return config;
 };
