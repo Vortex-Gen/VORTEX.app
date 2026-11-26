@@ -1125,7 +1125,7 @@ class VortexBridgeModule(private val reactCtx: ReactApplicationContext) :
   }
 
   init {
-      reactCtx = reactApplicationContext
+      Companion.reactCtx = reactCtx
   }
   
     override fun getName(): String = "VortexBridge"
