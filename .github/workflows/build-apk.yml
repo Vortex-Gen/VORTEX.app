@@ -29,14 +29,26 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          cache: 'gradle'
+
+      - name: Configure Gradle Network Resilience
+        run: |
+          mkdir -p ~/.gradle
+          cat << 'EOF' >> ~/.gradle/gradle.properties
+          org.gradle.internal.http.connectionTimeout=120000
+          org.gradle.internal.http.socketTimeout=120000
+          systemProp.org.gradle.internal.http.retry=true
+          EOF
 
       - name: Install Dependencies
+        env:
+          NPM_CONFIG_LEGACY_PEER_DEPS: "true"
         run: |
           npm install --legacy-peer-deps
           npx expo install --fix
 
       - name: Generate Native Android Project
-        run: npx expo prebuild --platform android --no-install
+        run: npx expo prebuild --platform android --clean --no-install
 
       - name: Build Standalone Release APK
         run: |
@@ -49,20 +61,3 @@ jobs:
         with:
           name: Vortex-Beta-Release-APK
           path: android/app/build/outputs/apk/release/app-release.apk
-      
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-          cache: 'gradle'
-
-      - name: Configure Gradle Network Resilience
-        run: |
-          mkdir -p ~/.gradle
-          cat << 'EOF' >> ~/.gradle/gradle.properties
-          org.gradle.internal.http.connectionTimeout=120000
-          org.gradle.internal.http.socketTimeout=120000
-          systemProp.org.gradle.internal.http.retry=true
-          EOF
-          
