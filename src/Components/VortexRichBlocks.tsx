@@ -4,6 +4,7 @@ import {
   Alert,
   Dimensions,
   Image,
+  Linking,
   Modal,
   NativeModules,
   ScrollView,
