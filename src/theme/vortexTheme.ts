@@ -163,11 +163,11 @@ export const VORTEX_FONTS: Record<
   goodtimes: {
     label: 'Good Times',
     tag: 'Futuristic HUD',
-    regular: 'GoodTimes-Regular',
-    medium: 'GoodTimes-Regular',
-    bold: 'GoodTimes-Regular',
-    italic: 'GoodTimes-Regular',
-    display: 'GoodTimes-Regular',
+    regular: 'GoodTimes',
+    medium: 'GoodTimes',
+    bold: 'GoodTimes',
+    italic: 'GoodTimes',
+    display: 'GoodTimes',
     code: SYSTEM_MONO,
   },
   vermin: {
