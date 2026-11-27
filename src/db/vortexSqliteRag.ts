@@ -318,8 +318,27 @@ export async function retrieveRagContext(
     const docBigramSet = new Set(extractBigrams(docTokens));
 
     let tokenHits = 0;
+    let prefixHits = 0;
+    const tagSet = new Set(
+      rec.tags
+        .split(',')
+        .map((t) => t.trim().toLowerCase())
+        .filter(Boolean)
+    );
+    let tagHits = 0;
+
     for (const qt of queryTokens) {
-      if (docTokenSet.has(qt)) tokenHits += 1;
+      if (docTokenSet.has(qt)) {
+        tokenHits += 1;
+      } else if (qt.length >= 4) {
+        const hasPrefix = Array.from(docTokenSet).some(
+          (dt) => dt.startsWith(qt) || qt.startsWith(dt)
+        );
+        if (hasPrefix) prefixHits += 0.5;
+      }
+      if (tagSet.has(qt)) {
+        tagHits += 1;
+      }
     }
 
     let bigramHits = 0;
@@ -327,13 +346,21 @@ export async function retrieveRagContext(
       if (docBigramSet.has(qb)) bigramHits += 1;
     }
 
-    const lexicalRatio = queryTokens.length > 0 ? tokenHits / queryTokens.length : 0.2;
-    const scopeBonus = options?.preferredScope && rec.scope === options.preferredScope ? 0.45 : 0;
-    const importanceWeight = rec.importance * 0.22;
+    const effectiveHits = tokenHits + prefixHits;
+    const lexicalRatio = queryTokens.length > 0 ? effectiveHits / queryTokens.length : 0.2;
+    const tagBonus = Math.min(0.9, tagHits * 0.3);
+    const scopeBonus = options?.preferredScope && rec.scope === options.preferredScope ? 0.55 : 0;
+    const importanceWeight = rec.importance * 0.24;
     const ageDays = Math.max(0, (now - rec.updatedAt) / (1000 * 60 * 60 * 24));
     const recencyBoost = 1 / (1 + ageDays * 0.04);
 
-    const score = lexicalRatio * 3.0 + bigramHits * 0.8 + scopeBonus + importanceWeight + recencyBoost * 0.4;
+    const score =
+      lexicalRatio * 3.1 +
+      bigramHits * 0.85 +
+      tagBonus +
+      scopeBonus +
+      importanceWeight +
+      recencyBoost * 0.4;
     return { record: rec, score };
   });
 
