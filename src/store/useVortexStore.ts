@@ -771,11 +771,11 @@ export const useVortexStore = create<VortexState>((set, get) => ({
 
   removeGeminiApiKey: async (id) => {
     const state = get();
-    const targetIdx = state.geminiKeyPool.findIndex((k) => k.id === id);
-    if (targetIdx < 0) return;
+    const targetEntry = state.geminiKeyPool.find((k) => k.id === id);
+    if (!targetEntry) return;
 
     const rawList = await get().getRawGeminiKeys();
-    const nextRaw = rawList.filter((_, idx) => idx !== targetIdx);
+    const nextRaw = rawList.filter((rawKey) => maskSecretKey(rawKey) !== targetEntry.maskedKey);
     if (VortexBridge?.saveSecureVaultItem) {
       await VortexBridge.saveSecureVaultItem(VAULT_GEMINI_KEYS, JSON.stringify(nextRaw));
     }
@@ -784,6 +784,7 @@ export const useVortexStore = create<VortexState>((set, get) => ({
     });
     await get().persistStore();
   },
+
 
   getRawGeminiKeys: async () => {
     try {
@@ -842,11 +843,11 @@ export const useVortexStore = create<VortexState>((set, get) => ({
 
   removeElevenLabsApiKey: async (id) => {
     const state = get();
-    const targetIdx = state.elevenLabsKeyPool.findIndex((k) => k.id === id);
-    if (targetIdx < 0) return;
+    const targetEntry = state.elevenLabsKeyPool.find((k) => k.id === id);
+    if (!targetEntry) return;
 
     const rawList = await get().getRawElevenLabsKeys();
-    const nextRaw = rawList.filter((_, idx) => idx !== targetIdx);
+    const nextRaw = rawList.filter((rawKey) => maskSecretKey(rawKey) !== targetEntry.maskedKey);
     if (VortexBridge?.saveSecureVaultItem) {
       await VortexBridge.saveSecureVaultItem(VAULT_ELEVEN_KEYS, JSON.stringify(nextRaw));
     }
@@ -855,6 +856,7 @@ export const useVortexStore = create<VortexState>((set, get) => ({
     });
     await get().persistStore();
   },
+
 
   getRawElevenLabsKeys: async () => {
     try {
