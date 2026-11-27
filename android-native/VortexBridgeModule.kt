@@ -772,4 +772,24 @@ class VortexBridgeModule(private val reactContext: ReactApplicationContext) :
             promise.reject("SMS_ERR", t.message, t)
         }
     }
+
+    @ReactMethod
+    fun sendDirectReply(keyOrSender: String, message: String, promise: Promise) {
+        try {
+            val sent = VortexNotificationListener.sendDirectReply(keyOrSender, message)
+            promise.resolve(sent)
+        } catch (t: Throwable) {
+            promise.reject("REPLY_ERR", t.message, t)
+        }
+    }
+
+    @ReactMethod
+    fun dismissNotification(key: String, promise: Promise) {
+        try {
+            VortexNotificationListener.instance?.dismissNotificationSafe(key)
+            promise.resolve(true)
+        } catch (t: Throwable) {
+            promise.reject("NOTIF_DISMISS_ERR", t.message, t)
+        }
+    }
 }
