@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import {
   sanitizeHexColor,
   VORTEX_ACCENTS,
+  VORTEX_FONTS,
   VortexAccentKey,
   VortexFontPreset,
   VortexFontScale,
