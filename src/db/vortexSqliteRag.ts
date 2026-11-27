@@ -206,8 +206,8 @@ export async function ingestRagMemory(params: {
     if (existing) {
       const mergedImp = Math.max(existing.importance, safeImportance);
       await db.runAsync(
-        'UPDATE vortex_rag_memories SET updated_at = ?, importance = ?, tags = ? WHERE id = ?',
-        [now, mergedImp, tagString, existing.id]
+        'UPDATE vortex_rag_memories SET title = ?, content = ?, updated_at = ?, importance = ?, tags = ? WHERE id = ?',
+        [cleanTitle, cleanContent, now, mergedImp, tagString, existing.id]
       );
       return {
         id: existing.id,
