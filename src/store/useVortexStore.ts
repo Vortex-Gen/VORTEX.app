@@ -771,11 +771,17 @@ export const useVortexStore = create<VortexState>((set, get) => ({
 
   removeGeminiApiKey: async (id) => {
     const state = get();
-    const targetEntry = state.geminiKeyPool.find((k) => k.id === id);
-    if (!targetEntry) return;
+    const targetIdx = state.geminiKeyPool.findIndex((k) => k.id === id);
+    if (targetIdx < 0) return;
 
     const rawList = await get().getRawGeminiKeys();
-    const nextRaw = rawList.filter((rawKey) => maskSecretKey(rawKey) !== targetEntry.maskedKey);
+    const nextRaw =
+      rawList.length === state.geminiKeyPool.length
+        ? rawList.filter((_, idx) => idx !== targetIdx)
+        : rawList.filter(
+            (rawKey) => maskSecretKey(rawKey) !== state.geminiKeyPool[targetIdx].maskedKey
+          );
+
     if (VortexBridge?.saveSecureVaultItem) {
       await VortexBridge.saveSecureVaultItem(VAULT_GEMINI_KEYS, JSON.stringify(nextRaw));
     }
@@ -843,11 +849,17 @@ export const useVortexStore = create<VortexState>((set, get) => ({
 
   removeElevenLabsApiKey: async (id) => {
     const state = get();
-    const targetEntry = state.elevenLabsKeyPool.find((k) => k.id === id);
-    if (!targetEntry) return;
+    const targetIdx = state.elevenLabsKeyPool.findIndex((k) => k.id === id);
+    if (targetIdx < 0) return;
 
     const rawList = await get().getRawElevenLabsKeys();
-    const nextRaw = rawList.filter((rawKey) => maskSecretKey(rawKey) !== targetEntry.maskedKey);
+    const nextRaw =
+      rawList.length === state.elevenLabsKeyPool.length
+        ? rawList.filter((_, idx) => idx !== targetIdx)
+        : rawList.filter(
+            (rawKey) => maskSecretKey(rawKey) !== state.elevenLabsKeyPool[targetIdx].maskedKey
+          );
+
     if (VortexBridge?.saveSecureVaultItem) {
       await VortexBridge.saveSecureVaultItem(VAULT_ELEVEN_KEYS, JSON.stringify(nextRaw));
     }
@@ -1145,7 +1157,10 @@ export const useVortexStore = create<VortexState>((set, get) => ({
     void get().persistStore();
   },
 
-  setActiveNotebook: (id) => set({ activeNotebookId: id }),
+  setActiveNotebook: (id) => {
+    set({ activeNotebookId: id });
+    void get().persistStore();
+  },   
 
   updatePcSync: (patch) => {
     set((state) => ({
