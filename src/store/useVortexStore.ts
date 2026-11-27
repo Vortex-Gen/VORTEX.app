@@ -432,7 +432,7 @@ export const useVortexStore = create<VortexState>((set, get) => ({
   autoUnlockAppLock: true,
   hasAppLockPin: false,
 
-  fontPreset: 'sans',
+  fontPreset: 'aero',
   fontScale: 'standard',
 
   macros: [],
@@ -518,7 +518,10 @@ export const useVortexStore = create<VortexState>((set, get) => ({
           orbStealthMode: Boolean(parsed.orbStealthMode),
           orbAutoStartBoot: parsed.orbAutoStartBoot !== false,
           autoUnlockAppLock: parsed.autoUnlockAppLock !== false,
-          fontPreset: parsed.fontPreset || 'sans',
+          fontPreset:
+            parsed.fontPreset && VORTEX_FONTS[parsed.fontPreset as VortexFontPreset]
+              ? parsed.fontPreset
+              : 'aero',
           fontScale: parsed.fontScale || 'standard',
           macros: Array.isArray(parsed.macros) ? parsed.macros : [],
           workflows: Array.isArray(parsed.workflows) ? parsed.workflows : [],
