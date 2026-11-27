@@ -98,8 +98,9 @@ class VortexAccessibilityService : AccessibilityService() {
                 if (text.length < 8 || text.length > 8000) return@addPrimaryClipChangedListener
 
                 val hash = sha256Short(text)
-                if (hash == lastClipboardHash) return@addClipboardChangedListener
+                if (hash == lastClipboardHash) return@addPrimaryClipChangedListener
                 lastClipboardHash = hash
+
 
                 val looksLikeCodeOrError = text.contains("Exception") ||
                     text.contains("Error:") ||
