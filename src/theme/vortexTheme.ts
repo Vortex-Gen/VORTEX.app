@@ -1,6 +1,14 @@
 import { Platform } from 'react-native';
 
-export type VortexFontPreset = 'sans' | 'mono' | 'serif';
+export type VortexFontPreset =
+  | 'sans'
+  | 'aero'
+  | 'mono'
+  | 'ethnocentric'
+  | 'goodtimes'
+  | 'vermin'
+  | 'deadly';
+
 export type VortexFontScale = 'compact' | 'standard' | 'large';
 export type VortexAccentKey = 'sky' | 'emerald' | 'violet' | 'amber' | 'crimson';
 
@@ -95,30 +103,92 @@ export const VORTEX_SYNTAX = {
   plain: '#E2E8F0',
 };
 
+const SYSTEM_SANS = Platform.select({ android: 'sans-serif', default: 'System' }) as string;
+const SYSTEM_SANS_MED = Platform.select({ android: 'sans-serif-medium', default: 'System' }) as string;
+const SYSTEM_MONO = Platform.select({ android: 'monospace', default: 'Courier' }) as string;
+
 export const VORTEX_FONTS: Record<
   VortexFontPreset,
-  { label: string; regular: string; medium: string; bold: string; code: string }
+  {
+    label: string;
+    tag: string;
+    regular: string;
+    medium: string;
+    bold: string;
+    italic: string;
+    display: string;
+    code: string;
+  }
 > = {
   sans: {
     label: 'Clean Sans',
-    regular: Platform.select({ android: 'sans-serif', default: 'System' }) as string,
-    medium: Platform.select({ android: 'sans-serif-medium', default: 'System' }) as string,
-    bold: Platform.select({ android: 'sans-serif', default: 'System' }) as string,
-    code: Platform.select({ android: 'monospace', default: 'Courier' }) as string,
+    tag: 'Default UI',
+    regular: SYSTEM_SANS,
+    medium: SYSTEM_SANS_MED,
+    bold: SYSTEM_SANS_MED,
+    italic: SYSTEM_SANS,
+    display: 'Ethnocentric-Regular',
+    code: SYSTEM_MONO,
+  },
+  aero: {
+    label: 'Aero Matics',
+    tag: 'Cyber Geometric',
+    regular: 'AeroMatics-Regular',
+    medium: 'AeroMatics-Bold',
+    bold: 'AeroMatics-Bold',
+    italic: 'AeroMatics-Italic',
+    display: 'Ethnocentric-Regular',
+    code: SYSTEM_MONO,
   },
   mono: {
     label: 'Cyber Mono',
-    regular: Platform.select({ android: 'monospace', default: 'Courier' }) as string,
-    medium: Platform.select({ android: 'monospace', default: 'Courier' }) as string,
-    bold: Platform.select({ android: 'monospace', default: 'Courier' }) as string,
-    code: Platform.select({ android: 'monospace', default: 'Courier' }) as string,
+    tag: 'Terminal Code',
+    regular: SYSTEM_MONO,
+    medium: SYSTEM_MONO,
+    bold: SYSTEM_MONO,
+    italic: SYSTEM_MONO,
+    display: 'GoodTimes-Regular',
+    code: SYSTEM_MONO,
   },
-  serif: {
-    label: 'Editorial Serif',
-    regular: Platform.select({ android: 'serif', default: 'Georgia' }) as string,
-    medium: Platform.select({ android: 'serif', default: 'Georgia' }) as string,
-    bold: Platform.select({ android: 'serif', default: 'Georgia' }) as string,
-    code: Platform.select({ android: 'monospace', default: 'Courier' }) as string,
+  ethnocentric: {
+    label: 'Ethnocentric',
+    tag: 'Vortex Core',
+    regular: 'Ethnocentric-Regular',
+    medium: 'Ethnocentric-Regular',
+    bold: 'Ethnocentric-Regular',
+    italic: 'Ethnocentric-Regular',
+    display: 'Ethnocentric-Regular',
+    code: SYSTEM_MONO,
+  },
+  goodtimes: {
+    label: 'Good Times',
+    tag: 'Futuristic HUD',
+    regular: 'GoodTimes-Regular',
+    medium: 'GoodTimes-Regular',
+    bold: 'GoodTimes-Regular',
+    italic: 'GoodTimes-Regular',
+    display: 'GoodTimes-Regular',
+    code: SYSTEM_MONO,
+  },
+  vermin: {
+    label: 'Vermin Vibes',
+    tag: 'Neon Arcade',
+    regular: 'VerminVibes',
+    medium: 'VerminVibes',
+    bold: 'VerminVibes',
+    italic: 'VerminVibes',
+    display: 'VerminVibes',
+    code: SYSTEM_MONO,
+  },
+  deadly: {
+    label: 'Deadly Advance',
+    tag: 'Mecha Tactical',
+    regular: 'DeadlyAdvance',
+    medium: 'DeadlyAdvance',
+    bold: 'DeadlyAdvance',
+    italic: 'DeadlyAdvance-Italic',
+    display: 'DeadlyAdvance',
+    code: SYSTEM_MONO,
   },
 };
 
@@ -171,4 +241,4 @@ export function sanitizeHexColor(input: string | undefined | null, fallback = '#
 export function getScaledFontSize(baseSize: number, scale: VortexFontScale): number {
   const factor = VORTEX_SCALE_MULTIPLIER[scale] ?? 1.0;
   return Math.round(baseSize * factor * 10) / 10;
-}
+  }
