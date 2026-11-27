@@ -1,11 +1,10 @@
+import * as Clipboard from 'expo-clipboard';
+import * as FileSystem from 'expo-file-system';
+import * as Linking from 'expo-linking';
 import React, { useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
-  Dimensions,
   Image,
-  Linking,
-  Modal,
   NativeModules,
   ScrollView,
   StyleSheet,
@@ -13,983 +12,868 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
-import * as FileSystem from 'expo-file-system';
-import Svg, { Circle, G, Line, Polygon, Rect, Text as SvgText } from 'react-native-svg';
+import Svg, {
+  Circle,
+  Defs,
+  G,
+  LinearGradient,
+  Path,
+  Rect,
+  Stop,
+  Text as SvgText,
+} from 'react-native-svg';
 import {
-  VORTEX_BOX_STYLES,
-  VORTEX_COLORS,
+  useVortexStore,
+  VortexDiagramNode,
+  VortexDiagramSpec,
+} from '../store/useVortexStore';
+import {
+  getScaledFontSize,
+  VORTEX_ACCENTS,
   VORTEX_FONTS,
-  VORTEX_SYNTAX_COLORS,
-  VORTEX_TYPOGRAPHY,
+  VORTEX_LAYOUT,
+  VORTEX_PALETTE,
+  VORTEX_SYNTAX,
 } from '../theme/vortexTheme';
+import {
+  CheckIcon,
+  CodeBracketsIcon,
+  CopyIcon,
+  DownloadIcon,
+  ExpandIcon,
+  ExternalLinkIcon,
+  GhostHandIcon,
+  InjectBoltIcon,
+  SparklesIcon,
+} from './VortexIcons';
 
 const { VortexBridge } = NativeModules;
-const SCREEN_W = Dimensions.get('window').width;
 
-export interface VerifiedWebLink {
-  url: string;
-  title: string;
-  domain: string;
-  snippet: string;
-  extractedContent: string;
-  verified: boolean;
-  httpStatus: number;
-  readViaGhost?: boolean;
+interface VortexRichBlocksProps {
+  content: string;
+  diagramSpec?: VortexDiagramSpec;
+  generatedImageUrl?: string;
+  onRegenerateImage?: (prompt: string) => void;
 }
 
-export interface WebImageResult {
-  imageUrl: string;
-  title: string;
-  sourceUrl: string;
-}
-
-export interface GeneratedAiImage {
-  prompt: string;
-  imageUrl: string;
-  model: string;
-  seed: number;
-}
-
-interface DiagramNode {
-  id: string;
-  label: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  shape: 'rect' | 'diamond' | 'circle';
-  color: string;
-}
-
-interface DiagramEdge {
-  from: string;
-  to: string;
-  label?: string;
-}
-
-interface ParsedDiagram {
-  title: string;
-  nodes: DiagramNode[];
-  edges: DiagramEdge[];
-  width: number;
-  height: number;
-}
+type ContentSegment =
+  | { type: 'text'; value: string }
+  | { type: 'code'; language: string; code: string };
 
 const KEYWORDS = new Set([
-  'int', 'void', 'char', 'float', 'double', 'long', 'short', 'bool', 'boolean',
-  'class', 'struct', 'public', 'private', 'protected', 'static', 'final', 'const',
-  'let', 'var', 'val', 'fun', 'function', 'def', 'return', 'if', 'else', 'elif',
-  'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'try', 'catch',
-  'throw', 'new', 'delete', 'this', 'super', 'import', 'from', 'export', 'async',
-  'await', 'using', 'namespace', 'template', 'typename', 'virtual', 'override',
-  'null', 'nullptr', 'true', 'false', 'None', 'True', 'False', 'self',
+  'const',
+  'let',
+  'var',
+  'function',
+  'class',
+  'struct',
+  'enum',
+  'interface',
+  'type',
+  'public',
+  'private',
+  'protected',
+  'static',
+  'void',
+  'int',
+  'float',
+  'double',
+  'char',
+  'bool',
+  'boolean',
+  'string',
+  'val',
+  'fun',
+  'def',
+  'import',
+  'export',
+  'from',
+  'new',
+  'this',
+  'super',
+  'async',
+  'await',
+  'override',
+  'virtual',
+  'template',
+  'typename',
+  'namespace',
+  'using',
+  'include',
+  'null',
+  'true',
+  'false',
+  'None',
+  'True',
+  'False',
 ]);
 
-const TYPES = new Set([
-  'String', 'Int', 'Float', 'Double', 'Boolean', 'List', 'Map', 'Set', 'Array',
-  'Promise', 'View', 'Text', 'Node', 'TreeNode', 'Graph', 'Stack', 'Queue',
-  'vector', 'string', 'pair', 'map', 'set', 'queue', 'stack', 'size_t', 'uint8_t',
+const CONTROL_WORDS = new Set([
+  'if',
+  'else',
+  'elif',
+  'for',
+  'while',
+  'do',
+  'switch',
+  'case',
+  'default',
+  'break',
+  'continue',
+  'return',
+  'try',
+  'catch',
+  'finally',
+  'throw',
+  'raises',
+  'when',
 ]);
 
-function renderHighlightedLine(line: string, lineIdx: number) {
-  const trimmed = line.trim();
-  if (trimmed.startsWith('//') || trimmed.startsWith('#') && !trimmed.startsWith('#include') && !trimmed.startsWith('#define')) {
-    return (
-      <Text key={lineIdx} style={[VORTEX_TYPOGRAPHY.codeBlockText, { color: VORTEX_SYNTAX_COLORS.comment }]}>
-        {line || ' '}
-      </Text>
-    );
-  }
-  if (trimmed.startsWith('#include') || trimmed.startsWith('#define') || trimmed.startsWith('@')) {
-    return (
-      <Text key={lineIdx} style={[VORTEX_TYPOGRAPHY.codeBlockText, { color: VORTEX_SYNTAX_COLORS.preprocessor }]}>
-        {line || ' '}
-      </Text>
-    );
+function splitMarkdownSegments(raw: string): ContentSegment[] {
+  const segments: ContentSegment[] = [];
+  const fenceRegex = /```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null = fenceRegex.exec(raw);
+
+  while (match !== null) {
+    if (match.index > lastIndex) {
+      const textPart = raw.slice(lastIndex, match.index).trim();
+      if (textPart) {
+        segments.push({ type: 'text', value: textPart });
+      }
+    }
+    segments.push({
+      type: 'code',
+      language: (match[1] || 'code').toUpperCase(),
+      code: match[2].replace(/\n$/, ''),
+    });
+    lastIndex = match.index + match[0].length;
+    match = fenceRegex.exec(raw);
   }
 
-  const tokens = line.split(/(\s+|[()[\]{};,.:+\-*/%=<>!&|]+|"[^"]*"|'[^']*')/g).filter(Boolean);
-  if (tokens.length === 0) {
-    return <Text key={lineIdx} style={VORTEX_TYPOGRAPHY.codeBlockText}>{' '}</Text>;
+  if (lastIndex < raw.length) {
+    const trailing = raw.slice(lastIndex).trim();
+    if (trailing) {
+      segments.push({ type: 'text', value: trailing });
+    }
   }
 
-  return (
-    <Text key={lineIdx} style={VORTEX_TYPOGRAPHY.codeBlockText}>
-      {tokens.map((tok, i) => {
-        let color: string = VORTEX_SYNTAX_COLORS.plain;
-        if ((tok.startsWith('"') && tok.endsWith('"')) || (tok.startsWith("'") && tok.endsWith("'"))) {
-          color = VORTEX_SYNTAX_COLORS.string;
-        } else if (/^\d+(\.\d+)?$/.test(tok)) {
-          color = VORTEX_SYNTAX_COLORS.number;
-        } else if (KEYWORDS.has(tok)) {
-          color = VORTEX_SYNTAX_COLORS.keyword;
-        } else if (TYPES.has(tok)) {
-          color = VORTEX_SYNTAX_COLORS.type;
-        } else if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tok) && tokens[i + 1]?.startsWith('(')) {
-          color = VORTEX_SYNTAX_COLORS.function;
-        } else if (/^[=+\-*/<>!&|:]+$/.test(tok)) {
-          color = VORTEX_SYNTAX_COLORS.operator;
-        }
-        return (
-          <Text key={i} style={{ color }}>
-            {tok}
-          </Text>
-        );
-      })}
-    </Text>
-  );
+  return segments.length > 0 ? segments : [{ type: 'text', value: raw }];
 }
 
-export const VortexCodeBox: React.FC<{
+function tokenizeCodeLine(line: string): Array<{ text: string; color: string }> {
+  const tokens: Array<{ text: string; color: string }> = [];
+  const regex =
+    /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b[0-9]+(?:\.[0-9]+)?\b|\b[A-Za-z_][A-Za-z0-9_]*\b|[=+\-*/%<>!&|^~?:;.,()[\]{}]+|\s+)/g;
+
+  let match: RegExpExecArray | null = regex.exec(line);
+  while (match !== null) {
+    const token = match[0];
+    let color = VORTEX_SYNTAX.plain;
+
+    if (
+      (token.startsWith('"') && token.endsWith('"')) ||
+      (token.startsWith("'") && token.endsWith("'")) ||
+      (token.startsWith('`') && token.endsWith('`'))
+    ) {
+      color = VORTEX_SYNTAX.string;
+    } else if (/^[0-9]/.test(token)) {
+      color = VORTEX_SYNTAX.number;
+    } else if (CONTROL_WORDS.has(token)) {
+      color = VORTEX_SYNTAX.control;
+    } else if (KEYWORDS.has(token)) {
+      color = VORTEX_SYNTAX.keyword;
+    } else if (/^[A-Z][A-Za-z0-9_]*$/.test(token)) {
+      color = VORTEX_SYNTAX.type;
+    } else if (/^[a-z_][A-Za-z0-9_]*$/.test(token)) {
+      const nextChar = line[match.index + token.length];
+      color = nextChar === '(' ? VORTEX_SYNTAX.functionName : VORTEX_SYNTAX.plain;
+    } else if (/^[=+\-*/%<>!&|^~?:;.,()[\]{}]+$/.test(token)) {
+      color = VORTEX_SYNTAX.operator;
+    }
+
+    tokens.push({ text: token, color });
+    match = regex.exec(line);
+  }
+
+  return tokens.length > 0 ? tokens : [{ text: line, color: VORTEX_SYNTAX.plain }];
+}
+
+const SyntaxCodeBox: React.FC<{
   language: string;
   code: string;
-  onInjectFeedback?: (msg: string) => void;
-}> = ({ language, code, onInjectFeedback }) => {
+  accentPrimary: string;
+  accentSoft: string;
+  accentBorder: string;
+  codeFont: string;
+  fontSize: number;
+}> = ({
+  language,
+  code,
+  accentPrimary,
+  accentSoft,
+  accentBorder,
+  codeFont,
+  fontSize,
+}) => {
   const [copied, setCopied] = useState(false);
-  const cleanCode = code.trim();
-  const lines = useMemo(() => cleanCode.split('\n'), [cleanCode]);
+  const [injectStatus, setInjectStatus] = useState<'idle' | 'done'>('idle');
+  const openCodeCanvas = useVortexStore((s) => s.openCodeCanvas);
+
+  const lines = useMemo(() => code.split('\n'), [code]);
 
   const handleCopy = async () => {
-    await Clipboard.setStringAsync(cleanCode);
+    await Clipboard.setStringAsync(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
   };
 
-  const handleInject = async (humanTyping: boolean) => {
-    await Clipboard.setStringAsync(cleanCode);
-    if (VortexBridge?.injectTextToScreen) {
-      const ok = await VortexBridge.injectTextToScreen(cleanCode, humanTyping);
-      const msg = ok
-        ? humanTyping
-          ? 'Human-typed into active screen field.'
-          : 'Code injected directly into active editor.'
-        : 'Copied to clipboard! Open any editor & tap capsule INJECT.';
-      onInjectFeedback?.(msg);
-      Alert.alert('VORTEX Code Injector', msg);
-    } else {
-      Alert.alert('Copied', 'Code copied to clipboard.');
+  const handleInject = async (humanCadence: boolean) => {
+    try {
+      if (VortexBridge?.injectTextToFocusedNode) {
+        const ok = await VortexBridge.injectTextToFocusedNode(code, humanCadence);
+        if (ok) {
+          setInjectStatus('done');
+          setTimeout(() => setInjectStatus('idle'), 2000);
+          return;
+        }
+      }
+      await Clipboard.setStringAsync(code);
+      Alert.alert(
+        'Copied to Clipboard',
+        'Focus an editable input box in any app first, then tap Inject.'
+      );
+    } catch (_e) {
     }
   };
 
   return (
-    <View style={VORTEX_BOX_STYLES.codeBox}>
-      <View style={styles.boxHeader}>
-        <View style={styles.langPill}>
-          <View style={[styles.dot, { backgroundColor: VORTEX_COLORS.aiHeadingCyan }]} />
-          <Text style={[VORTEX_TYPOGRAPHY.badgeText, { color: VORTEX_COLORS.aiHeadingCyan }]}>
-            {(language || 'CODE').toUpperCase()}
+    <View style={[styles.codeCard, { borderColor: accentBorder }]}>
+      <View style={styles.codeHeader}>
+        <View style={styles.codeLangBadge}>
+          <CodeBracketsIcon size={13} color={accentPrimary} />
+          <Text style={[styles.codeLangText, { color: accentPrimary, fontFamily: codeFont }]}>
+            {language}
           </Text>
+          <Text style={styles.codeLineCount}>{lines.length}L</Text>
         </View>
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.chipBtn} onPress={handleCopy}>
-            <Text style={[styles.chipBtnText, { color: copied ? VORTEX_COLORS.aiAccentEmerald : '#E2E8F0' }]}>
-              {copied ? 'COPIED' : 'COPY'}
+
+        <View style={styles.codeActionsRow}>
+          <TouchableOpacity
+            onPress={handleCopy}
+            style={[styles.codeActionBtn, copied && { backgroundColor: accentSoft }]}
+          >
+            {copied ? (
+              <CheckIcon size={12} color={VORTEX_PALETTE.success} />
+            ) : (
+              <CopyIcon size={12} color={VORTEX_PALETTE.textSecondary} />
+            )}
+            <Text style={styles.codeActionLabel}>{copied ? 'COPIED' : 'COPY'}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => handleInject(false)}
+            style={[
+              styles.codeActionBtn,
+              injectStatus === 'done' && { backgroundColor: VORTEX_PALETTE.successSoft },
+            ]}
+          >
+            <InjectBoltIcon size={12} color={accentPrimary} />
+            <Text style={[styles.codeActionLabel, { color: accentPrimary }]}>
+              {injectStatus === 'done' ? 'INJECTED' : 'INJECT'}
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.chipBtn, { borderColor: VORTEX_COLORS.aiHeadingCyan }]}
-            onPress={() => handleInject(false)}
-          >
-            <Text style={[styles.chipBtnText, { color: VORTEX_COLORS.aiHeadingCyan }]}>INJECT</Text>
+
+          <TouchableOpacity onPress={() => handleInject(true)} style={styles.codeActionBtn}>
+            <GhostHandIcon size={12} color={VORTEX_PALETTE.warning} />
+            <Text style={[styles.codeActionLabel, { color: VORTEX_PALETTE.warning }]}>GHOST</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
-            style={[styles.chipBtn, { borderColor: VORTEX_COLORS.aiAccentViolet }]}
-            onPress={() => handleInject(true)}
+            onPress={() =>
+              openCodeCanvas({
+                title: `${language} Module`,
+                language,
+                code,
+              })
+            }
+            style={styles.codeActionBtn}
           >
-            <Text style={[styles.chipBtnText, { color: VORTEX_COLORS.aiAccentViolet }]}>GHOST TYPE</Text>
+            <ExpandIcon size={12} color={VORTEX_PALETTE.textPrimary} />
           </TouchableOpacity>
         </View>
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.codeScrollPad}>
-        <View>
-          {lines.map((line, idx) => (
-            <View key={idx} style={styles.codeLineRow}>
-              <Text style={styles.lineNumber}>{String(idx + 1).padStart(2, '0')}</Text>
-              {renderHighlightedLine(line, idx)}
-            </View>
-          ))}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.codeScroll}>
+        <View style={styles.codeBody}>
+          {lines.map((line, idx) => {
+            const tokens = tokenizeCodeLine(line);
+            return (
+              <View key={`ln_${idx}`} style={styles.codeLineRow}>
+                <Text style={[styles.gutterNumber, { fontFamily: codeFont, fontSize: fontSize - 2 }]}>
+                  {String(idx + 1).padStart(2, ' ')}
+                </Text>
+                <Text style={[styles.codeText, { fontFamily: codeFont, fontSize }]}>
+                  {tokens.map((tok, tIdx) => (
+                    <Text key={`tk_${idx}_${tIdx}`} style={{ color: tok.color }}>
+                      {tok.text}
+                    </Text>
+                  ))}
+                </Text>
+              </View>
+            );
+          })}
         </View>
       </ScrollView>
     </View>
   );
 };
 
-export const VortexPromptBox: React.FC<{
-  title?: string;
-  promptText: string;
-  onExecutePrompt?: (text: string) => void;
-}> = ({ title = 'PROMPT / COMMAND BLOCK', promptText, onExecutePrompt }) => {
-  const [copied, setCopied] = useState(false);
-  const clean = promptText.trim();
+const InteractiveDiagramBlock: React.FC<{
+  spec: VortexDiagramSpec;
+  accentPrimary: string;
+  accentBorder: string;
+  regularFont: string;
+}> = ({ spec, accentPrimary, accentBorder, regularFont }) => {
+  const openCodeCanvas = useVortexStore((s) => s.openCodeCanvas);
 
-  const handleCopy = async () => {
-    await Clipboard.setStringAsync(clean);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1800);
-  };
-
-  return (
-    <View style={VORTEX_BOX_STYLES.promptInjectBox}>
-      <View style={[styles.boxHeader, { backgroundColor: VORTEX_COLORS.promptBoxHeader }]}>
-        <View style={styles.langPill}>
-          <View style={[styles.dot, { backgroundColor: VORTEX_COLORS.aiAccentViolet }]} />
-          <Text style={[VORTEX_TYPOGRAPHY.badgeText, { color: VORTEX_COLORS.aiAccentViolet }]}>
-            {title}
-          </Text>
-        </View>
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.chipBtn} onPress={handleCopy}>
-            <Text style={[styles.chipBtnText, { color: copied ? VORTEX_COLORS.aiAccentEmerald : '#EDE9FE' }]}>
-              {copied ? 'COPIED' : 'COPY'}
-            </Text>
-          </TouchableOpacity>
-          {onExecutePrompt && (
-            <TouchableOpacity
-              style={[styles.chipBtn, { borderColor: VORTEX_COLORS.aiAccentViolet }]}
-              onPress={() => onExecutePrompt(clean)}
-            >
-              <Text style={[styles.chipBtnText, { color: VORTEX_COLORS.aiAccentViolet }]}>RUN</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-      <View style={{ padding: 16 }}>
-        <Text selectable style={VORTEX_TYPOGRAPHY.promptBlockText}>
-          {clean}
-        </Text>
-      </View>
-    </View>
-  );
-};
-
-function parseDiagramSpec(raw: string): ParsedDiagram {
-  const trimmed = raw.trim();
-  const palette = ['#38BDF8', '#34D399', '#A78BFA', '#FBBF24', '#FB7185', '#60A5FA'];
-
-  try {
-    if (trimmed.startsWith('{')) {
-      const parsed = JSON.parse(trimmed);
-      const rawNodes = Array.isArray(parsed.nodes) ? parsed.nodes : [];
-      const rawEdges = Array.isArray(parsed.edges) ? parsed.edges : [];
-      const nodes: DiagramNode[] = rawNodes.map((n: any, idx: number) => ({
-        id: String(n.id || `N${idx}`),
-        label: String(n.label || n.id || `Step ${idx + 1}`).slice(0, 26),
-        x: typeof n.x === 'number' ? n.x : 180,
-        y: typeof n.y === 'number' ? n.y : 55 + idx * 96,
-        w: 190,
-        h: 48,
-        shape: n.shape === 'diamond' ? 'diamond' : n.shape === 'circle' ? 'circle' : 'rect',
-        color: palette[idx % palette.length],
-      }));
-      const edges: DiagramEdge[] = rawEdges.map((e: any) => ({
-        from: String(e.from),
-        to: String(e.to),
-        label: e.label ? String(e.label).slice(0, 16) : undefined,
-      }));
-      const maxY = nodes.reduce((m, n) => Math.max(m, n.y + n.h + 40), 220);
-      const maxX = nodes.reduce((m, n) => Math.max(m, n.x + n.w / 2 + 40), 360);
-      return {
-        title: String(parsed.title || 'SYSTEM DIAGRAM'),
-        nodes,
-        edges,
-        width: Math.max(360, maxX),
-        height: Math.max(220, maxY),
-      };
-    }
-  } catch {}
-
-  const lines = trimmed
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('graph ') && !l.startsWith('flowchart '));
-
-  const nodeMap = new Map<string, DiagramNode>();
-  const edges: DiagramEdge[] = [];
-
-  const getOrCreateNode = (token: string): DiagramNode => {
-    const cleanToken = token.trim();
-    const match = cleanToken.match(/^([a-zA-Z0-9_]+)\s*(?:\[(.*?)\]|\{(.*?)\}|\((.*?)\))?$/);
-    const id = match?.[1] || cleanToken.replace(/[^a-zA-Z0-9_]/g, '_') || `N${nodeMap.size}`;
-    const label = (match?.[2] || match?.[3] || match?.[4] || id).slice(0, 26);
-    const shape: 'rect' | 'diamond' | 'circle' = match?.[3]
-      ? 'diamond'
-      : match?.[4]
-      ? 'circle'
-      : 'rect';
-
-    if (!nodeMap.has(id)) {
-      const idx = nodeMap.size;
-      const col = idx % 2;
-      const row = Math.floor(idx / 2);
-      nodeMap.set(id, {
-        id,
-        label,
-        x: nodeMap.size === 0 ? 185 : col === 0 ? 105 : 265,
-        y: 50 + row * 96,
-        w: 146,
-        h: 46,
-        shape,
-        color: palette[idx % palette.length],
-      });
-    }
-    return nodeMap.get(id)!;
-  };
-
-  for (const line of lines) {
-    const arrowParts = line.split(/-->|->|==>/);
-    if (arrowParts.length >= 2) {
-      for (let i = 0; i < arrowParts.length - 1; i++) {
-        let left = arrowParts[i].trim();
-        let right = arrowParts[i + 1].trim();
-        let edgeLabel: string | undefined;
-
-        const labelMatch = right.match(/^\|(.*?)\|\s*(.+)$/);
-        if (labelMatch) {
-          edgeLabel = labelMatch[1].trim().slice(0, 14);
-          right = labelMatch[2].trim();
-        }
-        const n1 = getOrCreateNode(left);
-        const n2 = getOrCreateNode(right);
-        edges.push({ from: n1.id, to: n2.id, label: edgeLabel });
-      }
-    } else {
-      getOrCreateNode(line);
-    }
-  }
-
-  const nodes = Array.from(nodeMap.values());
-  if (nodes.length <= 5) {
-    nodes.forEach((n, idx) => {
-      n.x = 185;
-      n.y = 48 + idx * 92;
-      n.w = 210;
+  const layout = useMemo(() => {
+    const tiers = new Map<number, VortexDiagramNode[]>();
+    spec.nodes.forEach((node) => {
+      const t = Number.isFinite(node.tier) ? node.tier : 0;
+      const list = tiers.get(t) || [];
+      list.push(node);
+      tiers.set(t, list);
     });
-  }
 
-  const maxY = nodes.reduce((m, n) => Math.max(m, n.y + 60), 220);
-  return {
-    title: 'VISUAL FLOW & ARCHITECTURE DIAGRAM',
-    nodes,
-    edges,
-    width: 370,
-    height: Math.max(220, maxY),
-  };
-}
+    const sortedTierKeys = Array.from(tiers.keys()).sort((a, b) => a - b);
+    const nodeW = 136;
+    const nodeH = 48;
+    const colGap = 24;
+    const rowGap = 54;
+    const padX = 20;
+    const padY = 20;
 
-export const VortexDiagramBox: React.FC<{ spec: string }> = ({ spec }) => {
-  const [zoomed, setZoomed] = useState(false);
-  const diagram = useMemo(() => parseDiagramSpec(spec), [spec]);
+    let maxCols = 1;
+    sortedTierKeys.forEach((k) => {
+      const len = tiers.get(k)?.length || 1;
+      if (len > maxCols) maxCols = len;
+    });
 
-  const renderSvgCanvas = (scaleMultiplier: number) => {
-    const w = diagram.width * scaleMultiplier;
-    const h = diagram.height * scaleMultiplier;
-    const nodeLookup = new Map(diagram.nodes.map((n) => [n.id, n]));
-
-    return (
-      <Svg width={w} height={h} viewBox={`0 0 ${diagram.width} ${diagram.height}`}>
-        {diagram.edges.map((edge, idx) => {
-          const from = nodeLookup.get(edge.from);
-          const to = nodeLookup.get(edge.to);
-          if (!from || !to) return null;
-          const x1 = from.x;
-          const y1 = from.y + from.h / 2;
-          const x2 = to.x;
-          const y2 = to.y - to.h / 2;
-          const midX = (x1 + x2) / 2;
-          const midY = (y1 + y2) / 2;
-
-          return (
-            <G key={`e-${idx}`}>
-              <Line
-                x1={x1}
-                y1={y1}
-                x2={x2}
-                y2={y2}
-                stroke="#38BDF8"
-                strokeWidth="2.2"
-              />
-              <Polygon
-                points={`${x2},${y2} ${x2 - 5},${y2 - 9} ${x2 + 5},${y2 - 9}`}
-                fill="#38BDF8"
-              />
-              {edge.label ? (
-                <SvgText
-                  x={midX + 6}
-                  y={midY}
-                  fill="#FBBF24"
-                  fontSize="11"
-                  fontWeight="bold"
-                >
-                  {edge.label}
-                </SvgText>
-              ) : null}
-            </G>
-          );
-        })}
-
-        {diagram.nodes.map((node) => {
-          const left = node.x - node.w / 2;
-          const top = node.y - node.h / 2;
-          return (
-            <G key={node.id}>
-              {node.shape === 'circle' ? (
-                <Circle
-                  cx={node.x}
-                  cy={node.y}
-                  r={node.h / 2 + 4}
-                  fill="#0B1626"
-                  stroke={node.color}
-                  strokeWidth="2.2"
-                />
-              ) : node.shape === 'diamond' ? (
-                <Polygon
-                  points={`${node.x},${top - 4} ${left + node.w + 6},${node.y} ${node.x},${top + node.h + 4} ${left - 6},${node.y}`}
-                  fill="#17122B"
-                  stroke={node.color}
-                  strokeWidth="2.2"
-                />
-              ) : (
-                <Rect
-                  x={left}
-                  y={top}
-                  width={node.w}
-                  height={node.h}
-                  rx={12}
-                  ry={12}
-                  fill="#0B1626"
-                  stroke={node.color}
-                  strokeWidth="2.2"
-                />
-              )}
-              <SvgText
-                x={node.x}
-                y={node.y + 4}
-                fill="#F8FAFC"
-                fontSize="12.5"
-                fontWeight="bold"
-                textAnchor="middle"
-              >
-                {node.label}
-              </SvgText>
-            </G>
-          );
-        })}
-      </Svg>
+    const canvasW = Math.max(320, maxCols * nodeW + (maxCols - 1) * colGap + padX * 2);
+    const canvasH = Math.max(
+      150,
+      sortedTierKeys.length * nodeH + Math.max(0, sortedTierKeys.length - 1) * rowGap + padY * 2
     );
-  };
+
+    const coords = new Map<
+      string,
+      { x: number; y: number; cx: number; cy: number; node: VortexDiagramNode }
+    >();
+
+    sortedTierKeys.forEach((tierKey, rowIdx) => {
+      const rowNodes = tiers.get(tierKey) || [];
+      const rowWidth = rowNodes.length * nodeW + (rowNodes.length - 1) * colGap;
+      const startX = (canvasW - rowWidth) / 2;
+      const y = padY + rowIdx * (nodeH + rowGap);
+
+      rowNodes.forEach((node, colIdx) => {
+        const x = startX + colIdx * (nodeW + colGap);
+        coords.set(node.id, {
+          x,
+          y,
+          cx: x + nodeW / 2,
+          cy: y + nodeH / 2,
+          node,
+        });
+      });
+    });
+
+    return { canvasW, canvasH, nodeW, nodeH, coords };
+  }, [spec]);
 
   return (
-    <View style={VORTEX_BOX_STYLES.diagramBox}>
-      <View style={[styles.boxHeader, { backgroundColor: VORTEX_COLORS.diagramBoxHeader }]}>
-        <View style={styles.langPill}>
-          <View style={[styles.dot, { backgroundColor: VORTEX_COLORS.aiAccentEmerald }]} />
-          <Text style={[VORTEX_TYPOGRAPHY.badgeText, { color: VORTEX_COLORS.aiAccentEmerald }]}>
-            {diagram.title}
-          </Text>
+    <View style={[styles.diagramCard, { borderColor: accentBorder }]}>
+      <View style={styles.diagramHeader}>
+        <View style={styles.diagramTitleRow}>
+          <SparklesIcon size={14} color={accentPrimary} />
+          <Text style={[styles.diagramTitle, { fontFamily: regularFont }]}>{spec.title}</Text>
         </View>
         <TouchableOpacity
-          style={[styles.chipBtn, { borderColor: VORTEX_COLORS.aiAccentEmerald }]}
-          onPress={() => setZoomed(true)}
+          onPress={() =>
+            openCodeCanvas({
+              title: spec.title,
+              language: 'VORTEX-DIAGRAM',
+              code: JSON.stringify(spec, null, 2),
+              diagramSpec: spec,
+            })
+          }
+          style={styles.codeActionBtn}
         >
-          <Text style={[styles.chipBtnText, { color: VORTEX_COLORS.aiAccentEmerald }]}>ZOOM</Text>
+          <ExpandIcon size={12} color={accentPrimary} />
+          <Text style={[styles.codeActionLabel, { color: accentPrimary }]}>INSPECT</Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView horizontal contentContainerStyle={{ alignItems: 'center', justifyContent: 'center', padding: 10 }}>
-        {renderSvgCanvas(0.95)}
-      </ScrollView>
-
-      <Modal visible={zoomed} transparent animationType="fade" onRequestClose={() => setZoomed(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.zoomCard}>
-            <View style={styles.boxHeader}>
-              <Text style={[VORTEX_TYPOGRAPHY.subHeading, { color: VORTEX_COLORS.aiHeadingCyan }]}>
-                {diagram.title}
-              </Text>
-              <TouchableOpacity style={styles.chipBtn} onPress={() => setZoomed(false)}>
-                <Text style={styles.chipBtnText}>CLOSE</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView horizontal>
-              <ScrollView contentContainerStyle={{ padding: 16 }}>
-                {renderSvgCanvas(1.25)}
-              </ScrollView>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-    </View>
-  );
-};
-
-export const VortexWebImageStrip: React.FC<{
-  images: WebImageResult[];
-  onOpenGhostUrl?: (url: string) => void;
-}> = ({ images, onOpenGhostUrl }) => {
-  const [previewImg, setPreviewImg] = useState<WebImageResult | null>(null);
-  if (!images || images.length === 0) return null;
-
-  return (
-    <View style={{ marginVertical: 10 }}>
-      <Text style={[VORTEX_TYPOGRAPHY.badgeText, { color: VORTEX_COLORS.aiHeadingCyan, marginBottom: 8 }]}>
-        VERIFIED WEB VISUALS ({images.length})
-      </Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        {images.map((item, idx) => (
-          <TouchableOpacity
-            key={`${item.imageUrl}-${idx}`}
-            style={styles.webImgCard}
-            onPress={() => setPreviewImg(item)}
-          >
-            <Image source={{ uri: item.imageUrl }} style={styles.webImgThumb} resizeMode="cover" />
-            <Text numberOfLines={2} style={styles.webImgCaption}>
-              {item.title}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+        <Svg width={layout.canvasW} height={layout.canvasH}>
+          <Defs>
+            <LinearGradient id="vortexNodeGrad" x1="0" y1="0" x2="1" y2="1">
+              <Stop offset="0" stopColor="#161C2C" stopOpacity="1" />
+              <Stop offset="1" stopColor="#0D111A" stopOpacity="1" />
+            </LinearGradient>
+          </Defs>
 
-      <Modal visible={!!previewImg} transparent animationType="fade" onRequestClose={() => setPreviewImg(null)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.zoomCard}>
-            {previewImg && (
-              <>
-                <Image
-                  source={{ uri: previewImg.imageUrl }}
-                  style={{ width: '100%', height: 300, borderRadius: 14, backgroundColor: '#050811' }}
-                  resizeMode="contain"
-                />
-                <Text style={[VORTEX_TYPOGRAPHY.subHeading, { marginTop: 12 }]}>{previewImg.title}</Text>
-                <View style={[styles.headerActions, { marginTop: 14 }]}>
-                  {onOpenGhostUrl && (
-                    <TouchableOpacity
-                      style={[styles.chipBtn, { borderColor: VORTEX_COLORS.aiHeadingCyan }]}
-                      onPress={() => {
-                        const u = previewImg.sourceUrl;
-                        setPreviewImg(null);
-                        onOpenGhostUrl(u);
-                      }}
-                    >
-                      <Text style={[styles.chipBtnText, { color: VORTEX_COLORS.aiHeadingCyan }]}>
-                        OPEN IN GHOST WEB
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                  <TouchableOpacity style={styles.chipBtn} onPress={() => setPreviewImg(null)}>
-                    <Text style={styles.chipBtnText}>CLOSE</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
-    </View>
-  );
-};
+          {spec.edges.map((edge, idx) => {
+            const fromPos = layout.coords.get(edge.from);
+            const toPos = layout.coords.get(edge.to);
+            if (!fromPos || !toPos) return null;
 
-export const VortexVerifiedLinksList: React.FC<{
-  links: VerifiedWebLink[];
-  onOpenGhostUrl?: (url: string) => void;
-}> = ({ links, onOpenGhostUrl }) => {
-  if (!links || links.length === 0) return null;
+            const startX = fromPos.cx;
+            const startY = fromPos.y + layout.nodeH;
+            const endX = toPos.cx;
+            const endY = toPos.y;
+            const midY = (startY + endY) / 2;
+            const d = `M ${startX} ${startY} C ${startX} ${midY}, ${endX} ${midY}, ${endX} ${endY}`;
 
-  return (
-    <View style={{ marginVertical: 10 }}>
-      <Text style={[VORTEX_TYPOGRAPHY.badgeText, { color: VORTEX_COLORS.aiAccentEmerald, marginBottom: 8 }]}>
-        LIVE-VISITED & VERIFIED SOURCES ({links.length})
-      </Text>
-      {links.map((link, idx) => (
-        <View key={`${link.url}-${idx}`} style={VORTEX_BOX_STYLES.verifiedLinkBox}>
-          <View style={styles.linkTopRow}>
-            <View style={styles.verifiedPill}>
-              <Text style={[styles.chipBtnText, { color: VORTEX_COLORS.aiAccentEmerald }]}>
-                {link.readViaGhost ? 'GHOST READ • 200 OK' : `VERIFIED • ${link.httpStatus || 200}`}
-              </Text>
-            </View>
-            <Text style={styles.domainLabel}>{link.domain}</Text>
-          </View>
-
-          <Text style={[VORTEX_TYPOGRAPHY.subHeading, { color: '#F8FAFC', marginTop: 6 }]}>
-            {link.title}
-          </Text>
-          <Text numberOfLines={3} style={styles.linkSnippet}>
-            {link.snippet}
-          </Text>
-
-          <View style={[styles.headerActions, { marginTop: 10 }]}>
-            {onOpenGhostUrl && (
-              <TouchableOpacity
-                style={[styles.chipBtn, { borderColor: VORTEX_COLORS.aiAccentViolet }]}
-                onPress={() => onOpenGhostUrl(link.url)}
-              >
-                <Text style={[styles.chipBtnText, { color: VORTEX_COLORS.aiAccentViolet }]}>
-                  GHOST VIEW
-                </Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={[styles.chipBtn, { borderColor: VORTEX_COLORS.aiAccentEmerald }]}
-              onPress={() => Linking.openURL(link.url)}
-            >
-              <Text style={[styles.chipBtnText, { color: VORTEX_COLORS.aiAccentEmerald }]}>
-                OPEN LINK
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-};
-
-export const VortexAiImageCard: React.FC<{
-  image: GeneratedAiImage;
-  onRemixPrompt?: (prompt: string) => void;
-}> = ({ image, onRemixPrompt }) => {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  const handleSave = async () => {
-    try {
-      setSaving(true);
-      const baseDir = (FileSystem as any).documentDirectory || (FileSystem as any).cacheDirectory || '';
-      const dest = `${baseDir}vortex_ai_${Date.now()}.jpg`;
-      await FileSystem.downloadAsync(image.imageUrl, dest);
-      Alert.alert('Saved', `HD Image saved to app storage:\n${dest}`);
-    } catch (e: any) {
-      Alert.alert('Save Error', e?.message || 'Could not download image.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <View style={VORTEX_BOX_STYLES.aiImageBox}>
-      <View style={[styles.boxHeader, { backgroundColor: '#1E1430' }]}>
-        <View style={styles.langPill}>
-          <View style={[styles.dot, { backgroundColor: VORTEX_COLORS.aiAccentViolet }]} />
-          <Text style={[VORTEX_TYPOGRAPHY.badgeText, { color: VORTEX_COLORS.aiAccentViolet }]}>
-            AI STUDIO • {image.model.toUpperCase()}
-          </Text>
-        </View>
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.chipBtn} onPress={handleSave} disabled={saving}>
-            <Text style={[styles.chipBtnText, { color: VORTEX_COLORS.aiAccentEmerald }]}>
-              {saving ? 'SAVING...' : 'SAVE HD'}
-            </Text>
-          </TouchableOpacity>
-          {onRemixPrompt && (
-            <TouchableOpacity
-              style={[styles.chipBtn, { borderColor: VORTEX_COLORS.aiAccentViolet }]}
-              onPress={() => onRemixPrompt(image.prompt)}
-            >
-              <Text style={[styles.chipBtnText, { color: VORTEX_COLORS.aiAccentViolet }]}>REMIX</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-
-      <View style={{ width: '100%', height: SCREEN_W - 44, backgroundColor: '#070910', justifyContent: 'center', alignItems: 'center' }}>
-        {loading && <ActivityIndicator size="large" color={VORTEX_COLORS.aiAccentViolet} style={{ position: 'absolute' }} />}
-        <Image
-          source={{ uri: image.imageUrl }}
-          style={{ width: '100%', height: '100%' }}
-          resizeMode="cover"
-          onLoadEnd={() => setLoading(false)}
-        />
-      </View>
-
-      <View style={{ padding: 12 }}>
-        <Text style={{ color: '#CBD5E1', fontSize: 13.5, fontFamily: VORTEX_FONTS.sansBody }}>
-          Prompt: <Text style={{ color: '#F8FAFC', fontWeight: '600' }}>{image.prompt}</Text>
-        </Text>
-      </View>
-    </View>
-  );
-};
-
-function renderFormattedInline(text: string) {
-  const parts = text.split(/(\*\*.*?\*\*|`[^`]+`)/g).filter(Boolean);
-  return parts.map((part, idx) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return (
-        <Text key={idx} style={VORTEX_TYPOGRAPHY.aiBoldHighlight}>
-          {part.slice(2, -2)}
-        </Text>
-      );
-    }
-    if (part.startsWith('`') && part.endsWith('`')) {
-      return (
-        <Text key={idx} style={VORTEX_TYPOGRAPHY.aiInlineCode}>
-          {` ${part.slice(1, -1)} `}
-        </Text>
-      );
-    }
-    return <Text key={idx}>{part}</Text>;
-  });
-}
-
-export const VortexRichMessageRenderer: React.FC<{
-  content: string;
-  webImages?: WebImageResult[];
-  verifiedLinks?: VerifiedWebLink[];
-  generatedImage?: GeneratedAiImage;
-  onExecutePrompt?: (cmd: string) => void;
-  onOpenGhostUrl?: (url: string) => void;
-  onRemixImage?: (prompt: string) => void;
-}> = ({
-  content,
-  webImages,
-  verifiedLinks,
-  generatedImage,
-  onExecutePrompt,
-  onOpenGhostUrl,
-  onRemixImage,
-}) => {
-  const segments = useMemo(() => {
-    const regex = /```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g;
-    const out: Array<{ type: 'text' | 'fence'; lang?: string; body: string }> = [];
-    let lastIndex = 0;
-    let match: RegExpExecArray | null;
-
-    while ((match = regex.exec(content)) !== null) {
-      if (match.index > lastIndex) {
-        out.push({ type: 'text', body: content.slice(lastIndex, match.index) });
-      }
-      out.push({
-        type: 'fence',
-        lang: (match[1] || 'text').toLowerCase(),
-        body: match[2],
-      });
-      lastIndex = regex.lastIndex;
-    }
-    if (lastIndex < content.length) {
-      out.push({ type: 'text', body: content.slice(lastIndex) });
-    }
-    return out;
-  }, [content]);
-
-  return (
-    <View style={VORTEX_BOX_STYLES.aiResponseContainer}>
-      {webImages && webImages.length > 0 && (
-        <VortexWebImageStrip images={webImages} onOpenGhostUrl={onOpenGhostUrl} />
-      )}
-
-      {generatedImage && (
-        <VortexAiImageCard image={generatedImage} onRemixPrompt={onRemixImage} />
-      )}
-
-      {segments.map((seg, segIdx) => {
-        if (seg.type === 'fence') {
-          if (seg.lang === 'diagram' || seg.lang === 'mermaid') {
-            return <VortexDiagramBox key={segIdx} spec={seg.body} />;
-          }
-          if (seg.lang === 'prompt' || seg.lang === 'command' || seg.lang === 'macro') {
             return (
-              <VortexPromptBox
-                key={segIdx}
-                title={seg.lang === 'macro' ? 'AUTONOMOUS MACRO' : 'AI PROMPT / COMMAND'}
-                promptText={seg.body}
-                onExecutePrompt={onExecutePrompt}
-              />
+              <G key={`edge_${idx}`}>
+                <Path
+                  d={d}
+                  stroke={accentPrimary}
+                  strokeWidth={1.7}
+                  strokeOpacity={0.75}
+                  fill="none"
+                />
+                <Circle cx={endX} cy={endY} r={3} fill={accentPrimary} />
+                {edge.label ? (
+                  <SvgText
+                    x={(startX + endX) / 2}
+                    y={midY - 4}
+                    fill={VORTEX_PALETTE.textSecondary}
+                    fontSize={9}
+                    textAnchor="middle"
+                  >
+                    {edge.label.slice(0, 18)}
+                  </SvgText>
+                ) : null}
+              </G>
             );
-          }
-          return <VortexCodeBox key={segIdx} language={seg.lang || 'CODE'} code={seg.body} />;
+          })}
+
+          {Array.from(layout.coords.values()).map(({ x, y, cx, node }) => {
+            const strokeCol = node.accent || accentPrimary;
+            return (
+              <G key={node.id}>
+                <Rect
+                  x={x}
+                  y={y}
+                  width={layout.nodeW}
+                  height={layout.nodeH}
+                  rx={11}
+                  fill="url(#vortexNodeGrad)"
+                  stroke={strokeCol}
+                  strokeWidth={1.3}
+                />
+                <SvgText
+                  x={cx}
+                  y={y + (node.sublabel ? 20 : 28)}
+                  fill={VORTEX_PALETTE.textPrimary}
+                  fontSize={11}
+                  fontWeight="bold"
+                  textAnchor="middle"
+                >
+                  {node.label.slice(0, 20)}
+                </SvgText>
+                {node.sublabel ? (
+                  <SvgText
+                    x={cx}
+                    y={y + 35}
+                    fill={VORTEX_PALETTE.textSecondary}
+                    fontSize={9}
+                    textAnchor="middle"
+                  >
+                    {node.sublabel.slice(0, 22)}
+                  </SvgText>
+                ) : null}
+              </G>
+            );
+          })}
+        </Svg>
+      </ScrollView>
+    </View>
+  );
+};
+
+const InlineFormattedParagraph: React.FC<{
+  text: string;
+  accentPrimary: string;
+  regularFont: string;
+  boldFont: string;
+  codeFont: string;
+  fontSize: number;
+}> = ({ text, accentPrimary, regularFont, boldFont, codeFont, fontSize }) => {
+  const lines = text.split('\n');
+  const urls = useMemo(() => {
+    const matches = text.match(/https?:\/\/[^\s)]+/g) || [];
+    return Array.from(new Set(matches)).slice(0, 4);
+  }, [text]);
+
+  return (
+    <View style={styles.paragraphWrap}>
+      {lines.map((line, lIdx) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          return <View key={`sp_${lIdx}`} style={{ height: 6 }} />;
         }
 
-        const lines = seg.body.split('\n');
-        return (
-          <View key={segIdx}>
-            {lines.map((line, lIdx) => {
-              const t = line.trim();
-              if (!t) return <View key={lIdx} style={{ height: 8 }} />;
+        const isBullet = /^[-*•]\s+/.test(trimmed);
+        const cleanLine = isBullet ? trimmed.replace(/^[-*•]\s+/, '') : line;
+        const parts = cleanLine.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
 
-              if (t.startsWith('## ')) {
-                return (
-                  <Text key={lIdx} style={VORTEX_TYPOGRAPHY.sectionTitle}>
-                    {t.replace(/^##\s+/, '')}
-                  </Text>
-                );
-              }
-              if (t.startsWith('### ')) {
-                return (
-                  <Text key={lIdx} style={VORTEX_TYPOGRAPHY.subHeading}>
-                    {t.replace(/^###\s+/, '')}
-                  </Text>
-                );
-              }
-              if (t.startsWith('* ') || t.startsWith('- ')) {
-                return (
-                  <View key={lIdx} style={styles.bulletRow}>
-                    <Text style={styles.bulletDot}>◆</Text>
-                    <Text style={[VORTEX_TYPOGRAPHY.aiBodyText, { flex: 1 }]}>
-                      {renderFormattedInline(t.slice(2))}
+        return (
+          <View key={`ln_${lIdx}`} style={isBullet ? styles.bulletRow : styles.textLineRow}>
+            {isBullet ? (
+              <Text style={[styles.bulletDot, { color: accentPrimary, fontSize }]}>•</Text>
+            ) : null}
+            <Text
+              style={[
+                styles.bodyText,
+                {
+                  fontFamily: regularFont,
+                  fontSize,
+                  lineHeight: Math.round(fontSize * 1.48),
+                },
+              ]}
+            >
+              {parts.map((part, pIdx) => {
+                if (part.startsWith('**') && part.endsWith('**')) {
+                  return (
+                    <Text
+                      key={`b_${pIdx}`}
+                      style={{ fontFamily: boldFont, color: VORTEX_PALETTE.textPrimary }}
+                    >
+                      {part.slice(2, -2)}
                     </Text>
-                  </View>
-                );
-              }
-              const numMatch = t.match(/^(\d+\.)\s+(.*)$/);
-              if (numMatch) {
-                return (
-                  <View key={lIdx} style={styles.bulletRow}>
-                    <Text style={styles.numberBadge}>{numMatch[1]}</Text>
-                    <Text style={[VORTEX_TYPOGRAPHY.aiBodyText, { flex: 1 }]}>
-                      {renderFormattedInline(numMatch[2])}
+                  );
+                }
+                if (part.startsWith('`') && part.endsWith('`')) {
+                  return (
+                    <Text
+                      key={`c_${pIdx}`}
+                      style={{
+                        fontFamily: codeFont,
+                        color: accentPrimary,
+                        backgroundColor: 'rgba(255,255,255,0.06)',
+                      }}
+                    >
+                      {` ${part.slice(1, -1)} `}
                     </Text>
-                  </View>
-                );
-              }
-              return (
-                <Text key={lIdx} style={VORTEX_TYPOGRAPHY.aiBodyText}>
-                  {renderFormattedInline(line)}
-                </Text>
-              );
-            })}
+                  );
+                }
+                return <Text key={`t_${pIdx}`}>{part}</Text>;
+              })}
+            </Text>
           </View>
         );
       })}
 
-      {verifiedLinks && verifiedLinks.length > 0 && (
-        <VortexVerifiedLinksList links={verifiedLinks} onOpenGhostUrl={onOpenGhostUrl} />
+      {urls.length > 0 ? (
+        <View style={styles.linkChipsWrap}>
+          {urls.map((url, idx) => (
+            <TouchableOpacity
+              key={`url_${idx}`}
+              onPress={() => void Linking.openURL(url)}
+              style={[styles.linkChip, { borderColor: VORTEX_PALETTE.borderStrong }]}
+            >
+              <ExternalLinkIcon size={12} color={accentPrimary} />
+              <Text numberOfLines={1} style={[styles.linkChipText, { color: accentPrimary }]}>
+                {url.replace(/^https?:\/\//, '').slice(0, 34)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+};
+
+export const VortexRichBlocks: React.FC<VortexRichBlocksProps> = ({
+  content,
+  diagramSpec,
+  generatedImageUrl,
+  onRegenerateImage,
+}) => {
+  const fontPreset = useVortexStore((s) => s.fontPreset);
+  const fontScale = useVortexStore((s) => s.fontScale);
+  const accentKey = useVortexStore((s) => s.orbAccentKey);
+
+  const accent = VORTEX_ACCENTS[accentKey] || VORTEX_ACCENTS.sky;
+  const fonts = VORTEX_FONTS[fontPreset] || VORTEX_FONTS.aero;
+  const bodySize = getScaledFontSize(14.5, fontScale);
+  const codeSize = getScaledFontSize(12.5, fontScale);
+
+  const segments = useMemo(() => splitMarkdownSegments(content), [content]);
+  const [savedImageToast, setSavedImageToast] = useState(false);
+
+  const handleSaveGeneratedImage = async () => {
+    if (!generatedImageUrl) return;
+    try {
+      const dest = `${FileSystem.documentDirectory}VORTEX_Render_${Date.now()}.jpg`;
+      await FileSystem.downloadAsync(generatedImageUrl, dest);
+      setSavedImageToast(true);
+      setTimeout(() => setSavedImageToast(false), 2000);
+    } catch (_e) {
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      {segments.map((seg, idx) =>
+        seg.type === 'code' ? (
+          <SyntaxCodeBox
+            key={`seg_code_${idx}`}
+            language={seg.language}
+            code={seg.code}
+            accentPrimary={accent.primary}
+            accentSoft={accent.soft}
+            accentBorder={accent.border}
+            codeFont={fonts.code}
+            fontSize={codeSize}
+          />
+        ) : (
+          <InlineFormattedParagraph
+            key={`seg_txt_${idx}`}
+            text={seg.value}
+            accentPrimary={accent.primary}
+            regularFont={fonts.regular}
+            boldFont={fonts.bold}
+            codeFont={fonts.code}
+            fontSize={bodySize}
+          />
+        )
       )}
+
+      {diagramSpec ? (
+        <InteractiveDiagramBlock
+          spec={diagramSpec}
+          accentPrimary={accent.primary}
+          accentBorder={accent.border}
+          regularFont={fonts.bold}
+        />
+      ) : null}
+
+      {generatedImageUrl ? (
+        <View style={[styles.imageCard, { borderColor: accent.border }]}>
+          <Image
+            source={{ uri: generatedImageUrl }}
+            style={styles.generatedImage}
+            resizeMode="cover"
+          />
+          <View style={styles.imageFooter}>
+            <Text style={styles.imageBadge}>POLLINATIONS HD RENDER</Text>
+            <View style={styles.imageActions}>
+              {onRegenerateImage ? (
+                <TouchableOpacity
+                  onPress={() => onRegenerateImage(content)}
+                  style={styles.codeActionBtn}
+                >
+                  <SparklesIcon size={12} color={accent.primary} />
+                  <Text style={[styles.codeActionLabel, { color: accent.primary }]}>RE-ROLL</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity onPress={handleSaveGeneratedImage} style={styles.codeActionBtn}>
+                {savedImageToast ? (
+                  <CheckIcon size={12} color={VORTEX_PALETTE.success} />
+                ) : (
+                  <DownloadIcon size={12} color={VORTEX_PALETTE.textPrimary} />
+                )}
+                <Text style={styles.codeActionLabel}>
+                  {savedImageToast ? 'SAVED' : 'SAVE'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  boxHeader: {
+  container: {
+    gap: 10,
+  },
+  paragraphWrap: {
+    gap: 4,
+  },
+  textLineRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: VORTEX_COLORS.codeBoxHeader,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
-  },
-  langPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  chipBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 10,
-    backgroundColor: '#0F172A',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  chipBtnText: {
-    fontSize: 11.5,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    color: '#E2E8F0',
-  },
-  codeScrollPad: {
-    padding: 14,
-  },
-  codeLineRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 2,
-  },
-  lineNumber: {
-    width: 28,
-    fontSize: 13,
-    fontFamily: VORTEX_FONTS.mono,
-    color: '#475569',
-    marginRight: 8,
+    flexWrap: 'wrap',
   },
   bulletRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginVertical: 4,
     paddingLeft: 4,
+    gap: 8,
   },
   bulletDot: {
-    color: VORTEX_COLORS.aiHeadingCyan,
-    fontSize: 14,
-    marginRight: 10,
-    marginTop: 6,
+    fontWeight: '700',
+    marginTop: 1,
   },
-  numberBadge: {
-    color: VORTEX_COLORS.aiAccentEmerald,
-    fontSize: 16,
-    fontWeight: '800',
-    marginRight: 10,
-    marginTop: 2,
+  bodyText: {
+    color: VORTEX_PALETTE.textPrimary,
+    flexShrink: 1,
   },
-  webImgCard: {
-    width: 165,
-    backgroundColor: '#0B111E',
-    borderRadius: 16,
-    borderWidth: 1.2,
-    borderColor: '#1E3A5F',
-    marginRight: 10,
+  codeCard: {
+    backgroundColor: VORTEX_SYNTAX.background,
+    borderRadius: VORTEX_LAYOUT.radiusMd,
+    borderWidth: 1,
     overflow: 'hidden',
+    marginVertical: 4,
   },
-  webImgThumb: {
-    width: '100%',
-    height: 112,
-    backgroundColor: '#060912',
-  },
-  webImgCaption: {
-    color: '#E2E8F0',
-    fontSize: 12.5,
-    fontWeight: '600',
-    padding: 8,
-  },
-  linkTopRow: {
+  codeHeader: {
+    backgroundColor: VORTEX_SYNTAX.headerBg,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: VORTEX_PALETTE.borderHairline,
   },
-  verifiedPill: {
-    backgroundColor: '#06261C',
-    borderColor: '#059669',
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
+  codeLangBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-  domainLabel: {
-    color: '#94A3B8',
-    fontSize: 12.5,
+  codeLangText: {
+    fontSize: 11,
     fontWeight: '700',
+    letterSpacing: 0.6,
   },
-  linkSnippet: {
-    color: '#CBD5E1',
-    fontSize: 14.5,
-    lineHeight: 21,
+  codeLineCount: {
+    fontSize: 10,
+    color: VORTEX_PALETTE.textMuted,
+  },
+  codeActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  codeActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  codeActionLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: VORTEX_PALETTE.textSecondary,
+    letterSpacing: 0.4,
+  },
+  codeScroll: {
+    maxHeight: 340,
+  },
+  codeBody: {
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+  },
+  codeLineRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    minHeight: 19,
+  },
+  gutterNumber: {
+    color: VORTEX_SYNTAX.gutterText,
+    width: 26,
+    textAlign: 'right',
+    marginRight: 10,
+    userSelect: 'none',
+  },
+  codeText: {
+    color: VORTEX_SYNTAX.plain,
+  },
+  diagramCard: {
+    backgroundColor: VORTEX_PALETTE.surfaceCard,
+    borderRadius: VORTEX_LAYOUT.radiusMd,
+    borderWidth: 1,
+    overflow: 'hidden',
+    marginVertical: 4,
+  },
+  diagramHeader: {
+    backgroundColor: VORTEX_PALETTE.surfaceElevated,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: VORTEX_PALETTE.borderHairline,
+  },
+  diagramTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  diagramTitle: {
+    color: VORTEX_PALETTE.textPrimary,
+    fontSize: 12,
+    letterSpacing: 0.4,
+  },
+  linkChipsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+  },
+  linkChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: VORTEX_LAYOUT.radiusPill,
+    borderWidth: 1,
+    backgroundColor: VORTEX_PALETTE.surfaceElevated,
+  },
+  linkChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  imageCard: {
+    backgroundColor: VORTEX_PALETTE.surfaceCard,
+    borderRadius: VORTEX_LAYOUT.radiusMd,
+    borderWidth: 1,
+    overflow: 'hidden',
     marginTop: 4,
   },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.88)',
-    justifyContent: 'center',
-    padding: 16,
+  generatedImage: {
+    width: '100%',
+    height: 240,
+    backgroundColor: VORTEX_PALETTE.surfaceBase,
   },
-  zoomCard: {
-    backgroundColor: '#090E1A',
-    borderRadius: 22,
-    borderWidth: 1.5,
-    borderColor: '#38BDF8',
-    padding: 14,
-    maxHeight: '85%',
+  imageFooter: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: VORTEX_PALETTE.surfaceElevated,
+  },
+  imageBadge: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: VORTEX_PALETTE.textSecondary,
+    letterSpacing: 0.6,
+  },
+  imageActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
 });
-            
