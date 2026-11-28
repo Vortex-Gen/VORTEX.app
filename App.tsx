@@ -1,180 +1,199 @@
-import * as Font from 'expo-font';
-import React, { useEffect, useRef } from 'react';
-import { AppState, AppStateStatus, NativeModules, StatusBar, StyleSheet, View } from 'react-native';
+import { useFonts } from 'expo-font';
+import { StatusBar } from 'expo-status-bar';
+import React, { useEffect } from 'react';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { initSqliteRag } from './src/db/vortexSqliteRag';
+import { VortexNavigationShell } from './src/components/VortexNavigationShell';
+import { VortexPlusActionSheet } from './src/components/VortexPlusActionSheet';
+import { ingestRagMemory, seedInitialProjectKnowledge } from './src/db/vortexSqliteRag';
+import { vortexGhostAgent } from './src/engines/vortexGhostAgent';
+import { vortexLlmRouter } from './src/engines/vortexLlmRouter';
 import { vortexMacroScheduler } from './src/engines/vortexMacroScheduler';
 import { vortexVoiceWakeword } from './src/engines/vortexVoiceWakeword';
 import { VortexChatScreen } from './src/screens/VortexChatScreen';
 import { VortexGhostLoopScreen } from './src/screens/VortexGhostLoopScreen';
 import { VortexImageStudioScreen } from './src/screens/VortexImageStudioScreen';
-import {
-  VortexCodeCanvasScreen,
-  VortexLocalAiWakewordScreen,
-} from './src/screens/VortexLocalAiAndCodeCanvasScreen';
+import { VortexLocalAiAndCodeCanvasScreen } from './src/screens/VortexLocalAiAndCodeCanvasScreen';
 import { VortexMacrosAndWorkflowsScreen } from './src/screens/VortexMacrosAndWorkflowsScreen';
 import { VortexOrbStudioScreen } from './src/screens/VortexOrbStudioScreen';
-import { VortexSettingsVaultScreen } from './src/screens/VortexSettingsVaultScreen';
 import { VortexStudyNotebooksScreen } from './src/screens/VortexStudyNotebooksScreen';
-import { VortexSystemTelemetryScreen } from './src/screens/VortexSystemTelemetryScreen';
-import { VortexWebInspectorScreen } from './src/screens/VortexWebInspectorScreen';
-import { useVortexStore } from './src/store/useVortexStore';
+import { VortexVoiceLiveScreen } from './src/screens/VortexVoiceLiveScreen';
+import { useVortexStore, VortexMessage } from './src/store/useVortexStore';
+import { VORTEX_FONT_ASSETS } from './src/theme/typography';
 import { VORTEX_PALETTE } from './src/theme/vortexTheme';
 
-const { VortexBridge } = NativeModules;
-
 export default function App() {
-  const activeScreen = useVortexStore((s) => s.activeScreen);
-  const hydrateStore = useVortexStore((s) => s.hydrateStore);
-  const refreshNativeDiagnostics = useVortexStore((s) => s.refreshNativeDiagnostics);
-  const notebooks = useVortexStore((s) => s.notebooks);
-  const addNotebook = useVortexStore((s) => s.addNotebook);
+  const [fontsLoaded] = useFonts(VORTEX_FONT_ASSETS);
 
-  const bootedRef = useRef(false);
+  const hydrated = useVortexStore((s) => s.hydrated);
+  const activeScreen = useVortexStore((s) => s.activeScreen);
+  const wakewordEnabled = useVortexStore((s) => s.wakewordEnabled);
+  const hydrateStore = useVortexStore((s) => s.hydrateStore);
 
   useEffect(() => {
-    if (bootedRef.current) return;
-    bootedRef.current = true;
+    let mounted = true;
 
-    const bootstrapVortex = async () => {
-      try {
-        await Font.loadAsync({
-          Aero: require('./assets/fonts/Aero.ttf'),
-          Orbitron: require('./assets/fonts/Orbitron.ttf'),
-          'Good Times': require('./assets/fonts/GoodTimes.ttf'),
-          'Tech Mono': require('./assets/fonts/ShareTechMono.ttf'),
-        });
-      } catch (_e) {
-      }
-
-      try {
-        await initSqliteRag();
-      } catch (_e) {
-      }
-
+    const bootstrap = async () => {
       await hydrateStore();
-      await refreshNativeDiagnostics();
+      await seedInitialProjectKnowledge();
+      if (!mounted) return;
 
-      const state = useVortexStore.getState();
+      vortexMacroScheduler.start();
 
-      if (state.notebooks.length === 0) {
-        const defaults = [
-          {
-            id: 'nb_ds_301',
-            subject: 'Data Structures',
-            code: 'CS-303',
-            semester: 'SBTET 3rd Sem',
-            notes:
-              'Stacks, Queues, Linked Lists, Binary Search Trees (BST), AVL Rotations, Graph Traversals (BFS/DFS), Sorting Algorithms (Quick Sort, Merge Sort, Insertion Sort).',
-            updatedAt: Date.now(),
-          },
-          {
-            id: 'nb_oop_302',
-            subject: 'OOP in C++',
-            code: 'CS-302',
-            semester: 'SBTET 3rd Sem',
-            notes:
-              'Classes & Objects, Constructors/Destructors, Operator Overloading, Inheritance Types, Virtual Functions, Runtime Polymorphism, Templates & Exception Handling.',
-            updatedAt: Date.now(),
-          },
-          {
-            id: 'nb_cn_303',
-            subject: 'Computer Networks',
-            code: 'CS-304',
-            semester: 'SBTET 3rd Sem',
-            notes:
-              'OSI 7-Layer Model, TCP/IP Suite, IPv4 Subnetting, Sliding Window Protocols, Routing Algorithms, DNS, HTTP/HTTPS, Network Security.',
-            updatedAt: Date.now(),
-          },
-          {
-            id: 'nb_de_304',
-            subject: 'Digital Electronics & COA',
-            code: 'CS-305',
-            semester: 'SBTET 3rd Sem',
-            notes:
-              'Boolean Algebra, K-Map Minimization, Combinational Circuits (Mux, Adder), Flip-Flops (SR, JK, D, T), Counters, CPU Pipelining & Cache Mapping.',
-            updatedAt: Date.now(),
-          },
-        ];
-        defaults.forEach((nb) => addNotebook(nb));
-      }
+      vortexVoiceWakeword.setCommandHandler(async (spokenCommand: string) => {
+        const store = useVortexStore.getState();
+        const sessionId = store.activeSessionId;
 
-      vortexMacroScheduler.initialize();
+        const userMsg: VortexMessage = {
+          id: `voice_u_${Date.now()}`,
+          role: 'user',
+          content: spokenCommand,
+          timestamp: Date.now(),
+          mode: store.activePromptMode,
+        };
+        store.appendMessage(sessionId, userMsg);
 
-      if (state.orbEnabled && VortexBridge?.startFloatingOrb) {
         try {
-          await VortexBridge.startFloatingOrb(state.orbOpacity, state.orbAccentKey);
-        } catch (_e) {
-        }
-      }
+          const agentRes = await vortexGhostAgent.executeCommand(spokenCommand);
+          if (agentRes.handled) {
+            const botMsg: VortexMessage = {
+              id: `voice_a_${Date.now()}`,
+              role: 'assistant',
+              content: agentRes.replyText,
+              timestamp: Date.now(),
+              mode: 'ghost',
+              providerTag: 'VORTEX Ghost Agent',
+            };
+            store.appendMessage(sessionId, botMsg);
+            await vortexVoiceWakeword.speakResponse(agentRes.spokenText || agentRes.replyText);
+            return;
+          }
 
-      if (state.wakewordEnabled) {
-        try {
-          await vortexVoiceWakeword.startContinuousWakeword();
-        } catch (_e) {
+          const currentSess = store.sessions.find((s) => s.id === sessionId);
+          const history = (currentSess?.messages || []).slice(-8).map((m) => ({
+            role: m.role,
+            content: m.content,
+          }));
+
+          const llmRes = await vortexLlmRouter.generate({
+            prompt: spokenCommand,
+            history,
+            mode: store.activePromptMode,
+          });
+
+          const aiMsg: VortexMessage = {
+            id: `voice_ai_${Date.now()}`,
+            role: 'assistant',
+            content: llmRes.text,
+            timestamp: Date.now(),
+            mode: llmRes.resolvedMode,
+            diagramSpec: llmRes.diagramSpec,
+            providerTag: llmRes.providerTag,
+            latencyMs: llmRes.latencyMs,
+          };
+          store.appendMessage(sessionId, aiMsg);
+
+          void ingestRagMemory({
+            scope: 'vortex',
+            title: `Voice Turn: ${spokenCommand.slice(0, 48)}`,
+            content: `User: ${spokenCommand}\nAssistant: ${llmRes.text.slice(0, 1200)}`,
+            tags: ['voice', llmRes.resolvedMode],
+            importance: 2,
+          });
+
+          await vortexVoiceWakeword.speakResponse(llmRes.text);
+        } catch (err: any) {
+          const errText = err?.message || 'Voice command execution failed.';
+          store.appendMessage(sessionId, {
+            id: `voice_err_${Date.now()}`,
+            role: 'assistant',
+            content: errText,
+            timestamp: Date.now(),
+            mode: 'auto',
+            isError: true,
+          });
+          await vortexVoiceWakeword.speakResponse(errText);
         }
+      });
+
+      if (useVortexStore.getState().wakewordEnabled) {
+        await vortexVoiceWakeword.startContinuousWakeword();
       }
     };
 
-    void bootstrapVortex();
-
-    const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
-      if (nextState === 'active') {
-        void refreshNativeDiagnostics();
-      }
-    });
+    void bootstrap();
 
     return () => {
-      sub.remove();
-      vortexMacroScheduler.destroy();
+      mounted = false;
+      vortexMacroScheduler.stop();
+      void vortexVoiceWakeword.shutdown();
     };
-  }, [addNotebook, hydrateStore, refreshNativeDiagnostics]);
+  }, [hydrateStore]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (wakewordEnabled) {
+      void vortexVoiceWakeword.startContinuousWakeword();
+    } else {
+      void vortexVoiceWakeword.shutdown();
+    }
+  }, [hydrated, wakewordEnabled]);
 
   const renderActiveScreen = () => {
     switch (activeScreen) {
-      case 'system_telemetry':
-        return <VortexSystemTelemetryScreen />;
-      case 'web_inspector':
-        return <VortexWebInspectorScreen />;
+      case 'voice_live':
+        return <VortexVoiceLiveScreen />;
       case 'orb_studio':
+      case 'settings':
         return <VortexOrbStudioScreen />;
-      case 'ghost_loop':
-        return <VortexGhostLoopScreen />;
-      case 'macros_workflows':
-        return <VortexMacrosAndWorkflowsScreen />;
       case 'image_studio':
         return <VortexImageStudioScreen />;
       case 'study_notebooks':
         return <VortexStudyNotebooksScreen />;
-      case 'local_ai':
-        return <VortexLocalAiWakewordScreen />;
+      case 'ghost_loop':
+        return <VortexGhostLoopScreen />;
+      case 'macros_alarms':
+      case 'skills_workflows':
+        return <VortexMacrosAndWorkflowsScreen />;
+      case 'local_ai_wakeword':
       case 'code_canvas':
-        return <VortexCodeCanvasScreen />;
-      case 'settings_vault':
-        return <VortexSettingsVaultScreen />;
+        return <VortexLocalAiAndCodeCanvasScreen />;
       case 'chat':
       default:
         return <VortexChatScreen />;
     }
   };
 
-  return (
-    <SafeAreaProvider>
-      <View style={styles.rootContainer}>
-        <StatusBar
-          barStyle="light-content"
-          backgroundColor={VORTEX_PALETTE.oledBlack}
-          translucent={false}
-        />
-        {renderActiveScreen()}
+  if (!fontsLoaded || !hydrated) {
+    return (
+      <View style={styles.bootContainer}>
+        <StatusBar style="light" backgroundColor={VORTEX_PALETTE.oledBlack} />
+        <ActivityIndicator size="large" color="#38BDF8" />
       </View>
-    </SafeAreaProvider>
+    );
+  }
+
+  return (
+    <GestureHandlerRootView style={styles.root}>
+      <SafeAreaProvider>
+        <StatusBar style="light" backgroundColor={VORTEX_PALETTE.oledBlack} />
+        <VortexNavigationShell>{renderActiveScreen()}</VortexNavigationShell>
+        <VortexPlusActionSheet />
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
-  rootContainer: {
+  root: {
     flex: 1,
     backgroundColor: VORTEX_PALETTE.oledBlack,
+  },
+  bootContainer: {
+    flex: 1,
+    backgroundColor: VORTEX_PALETTE.oledBlack,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
