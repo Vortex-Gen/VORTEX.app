@@ -20,11 +20,11 @@ import { VortexOrbStudioScreen } from './src/screens/VortexOrbStudioScreen';
 import { VortexStudyNotebooksScreen } from './src/screens/VortexStudyNotebooksScreen';
 import { VortexVoiceLiveScreen } from './src/screens/VortexVoiceLiveScreen';
 import { useVortexStore, VortexMessage } from './src/store/useVortexStore';
-import { VORTEX_FONT_ASSETS } from './src/theme/typography';
+import { loadVortexFontsFromStorage } from './src/theme/typography';
 import { VORTEX_PALETTE } from './src/theme/vortexTheme';
 
 export default function App() {
-  const [fontsLoaded] = useFonts(VORTEX_FONT_ASSETS);
+  const [fontsReady, setFontsReady] = React.useState(false);
 
   const hydrated = useVortexStore((s) => s.hydrated);
   const activeScreen = useVortexStore((s) => s.activeScreen);
@@ -35,6 +35,10 @@ export default function App() {
     let mounted = true;
 
     const bootstrap = async () => {
+      await loadVortexFontsFromStorage();
+      if (mounted) {
+        setFontsReady(true);
+      }
       await hydrateStore();
       await seedInitialProjectKnowledge();
       if (!mounted) return;
