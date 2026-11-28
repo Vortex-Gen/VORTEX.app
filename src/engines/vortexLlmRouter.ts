@@ -483,9 +483,10 @@ class VortexLlmRouter {
     mode: VortexPromptMode,
     systemInstruction: string
   ): Promise<string> {
-    const url = `[https://generativelanguage.googleapis.com/v1beta/models/$](https://generativelanguage.googleapis.com/v1beta/models/$){modelName}:generateContent?key=${encodeURIComponent(
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(
       apiKey
     )}`;
+
 
     const contents: any[] = [];
     if (params.history && params.history.length > 0) {
