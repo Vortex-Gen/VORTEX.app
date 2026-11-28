@@ -404,9 +404,10 @@ class VortexVoiceWakewordEngine {
       const masked = maskKeyForStore(apiKey);
 
       try {
-        const endpoint = `[https://api.elevenlabs.io/v1/text-to-speech/$](https://api.elevenlabs.io/v1/text-to-speech/$){encodeURIComponent(
+        const endpoint = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(
           voiceId
         )}`;
+
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: {
