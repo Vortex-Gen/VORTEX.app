@@ -1,217 +1,180 @@
-import React, { Component, ErrorInfo, ReactNode, useEffect } from 'react';
+import * as Font from 'expo-font';
+import React, { useEffect, useRef } from 'react';
+import { AppState, AppStateStatus, NativeModules, StatusBar, StyleSheet, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { initSqliteRag } from './src/db/vortexSqliteRag';
+import { vortexMacroScheduler } from './src/engines/vortexMacroScheduler';
+import { vortexVoiceWakeword } from './src/engines/vortexVoiceWakeword';
+import { VortexChatScreen } from './src/screens/VortexChatScreen';
+import { VortexGhostLoopScreen } from './src/screens/VortexGhostLoopScreen';
+import { VortexImageStudioScreen } from './src/screens/VortexImageStudioScreen';
 import {
-  DeviceEventEmitter,
-  NativeModules,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { VortexGlassCockpit } from './src/VortexGlassCockpit';
-import { getAppLockRule, initVortexDatabase } from './src/vortexMemoryEngine';
-import { vortexVoiceEngine } from './src/vortexVoiceEngine';
-import { vortexPcBridge } from './src/vortexPcBridge';
+  VortexCodeCanvasScreen,
+  VortexLocalAiWakewordScreen,
+} from './src/screens/VortexLocalAiAndCodeCanvasScreen';
+import { VortexMacrosAndWorkflowsScreen } from './src/screens/VortexMacrosAndWorkflowsScreen';
+import { VortexOrbStudioScreen } from './src/screens/VortexOrbStudioScreen';
+import { VortexSettingsVaultScreen } from './src/screens/VortexSettingsVaultScreen';
+import { VortexStudyNotebooksScreen } from './src/screens/VortexStudyNotebooksScreen';
+import { VortexSystemTelemetryScreen } from './src/screens/VortexSystemTelemetryScreen';
+import { VortexWebInspectorScreen } from './src/screens/VortexWebInspectorScreen';
+import { useVortexStore } from './src/store/useVortexStore';
+import { VORTEX_PALETTE } from './src/theme/vortexTheme';
 
 const { VortexBridge } = NativeModules;
 
-interface ErrorBoundaryState {
-  hasError: boolean;
-  errorMessage: string;
-}
-
-class VortexBootBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
-  state: ErrorBoundaryState = {
-    hasError: false,
-    errorMessage: '',
-  };
-
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return {
-      hasError: true,
-      errorMessage: error?.message || 'Unexpected runtime exception',
-    };
-  }
-
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.warn('VORTEX Boundary Caught:', error, info);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <View style={styles.fallbackRoot}>
-          <Text style={styles.fallbackTitle}>VORTEX ẞ SAFE RECOVERY</Text>
-          <Text style={styles.fallbackBody}>{this.state.errorMessage}</Text>
-          <TouchableOpacity
-            style={styles.fallbackBtn}
-            onPress={() => this.setState({ hasError: false, errorMessage: '' })}
-          >
-            <Text style={styles.fallbackBtnText}>RELOAD CORE</Text>
-          </TouchableOpacity>
-        </View>
-      );
-    }
-    return this.props.children;
-  }
-}
-
 export default function App() {
+  const activeScreen = useVortexStore((s) => s.activeScreen);
+  const hydrateStore = useVortexStore((s) => s.hydrateStore);
+  const refreshNativeDiagnostics = useVortexStore((s) => s.refreshNativeDiagnostics);
+  const notebooks = useVortexStore((s) => s.notebooks);
+  const addNotebook = useVortexStore((s) => s.addNotebook);
+
+  const bootedRef = useRef(false);
+
   useEffect(() => {
-    let mounted = true;
-    let lastUnlockedPkg = '';
-    let lastUnlockTs = 0;
+    if (bootedRef.current) return;
+    bootedRef.current = true;
 
-    const bootVortexCore = async () => {
+    const bootstrapVortex = async () => {
       try {
-        // 1. Initialize SQLite RAG, Multi-Key Pool, Study Vault & Standby PC Queue
-        await initVortexDatabase();
+        await Font.loadAsync({
+          Aero: require('./assets/fonts/Aero.ttf'),
+          Orbitron: require('./assets/fonts/Orbitron.ttf'),
+          'Good Times': require('./assets/fonts/GoodTimes.ttf'),
+          'Tech Mono': require('./assets/fonts/ShareTechMono.ttf'),
+        });
+      } catch (_e) {
+      }
 
-        // 2. Initialize Zero-Beep "Hey Vortex" Wakeword + ElevenLabs Voice Engine
-        await vortexVoiceEngine.initialize();
+      try {
+        await initSqliteRag();
+      } catch (_e) {
+      }
 
-        // 3. Start Unified ẞ Floating Orb at 40% Idle Opacity if Overlay Permission Granted
-        const canOverlay = (await VortexBridge?.canDrawOverlays?.()) ?? false;
-        if (canOverlay && mounted) {
-          await VortexBridge?.startFloatingOrb?.();
-          await VortexBridge?.setOrbOpacity?.(0.4);
+      await hydrateStore();
+      await refreshNativeDiagnostics();
+
+      const state = useVortexStore.getState();
+
+      if (state.notebooks.length === 0) {
+        const defaults = [
+          {
+            id: 'nb_ds_301',
+            subject: 'Data Structures',
+            code: 'CS-303',
+            semester: 'SBTET 3rd Sem',
+            notes:
+              'Stacks, Queues, Linked Lists, Binary Search Trees (BST), AVL Rotations, Graph Traversals (BFS/DFS), Sorting Algorithms (Quick Sort, Merge Sort, Insertion Sort).',
+            updatedAt: Date.now(),
+          },
+          {
+            id: 'nb_oop_302',
+            subject: 'OOP in C++',
+            code: 'CS-302',
+            semester: 'SBTET 3rd Sem',
+            notes:
+              'Classes & Objects, Constructors/Destructors, Operator Overloading, Inheritance Types, Virtual Functions, Runtime Polymorphism, Templates & Exception Handling.',
+            updatedAt: Date.now(),
+          },
+          {
+            id: 'nb_cn_303',
+            subject: 'Computer Networks',
+            code: 'CS-304',
+            semester: 'SBTET 3rd Sem',
+            notes:
+              'OSI 7-Layer Model, TCP/IP Suite, IPv4 Subnetting, Sliding Window Protocols, Routing Algorithms, DNS, HTTP/HTTPS, Network Security.',
+            updatedAt: Date.now(),
+          },
+          {
+            id: 'nb_de_304',
+            subject: 'Digital Electronics & COA',
+            code: 'CS-305',
+            semester: 'SBTET 3rd Sem',
+            notes:
+              'Boolean Algebra, K-Map Minimization, Combinational Circuits (Mux, Adder), Flip-Flops (SR, JK, D, T), Counters, CPU Pipelining & Cache Mapping.',
+            updatedAt: Date.now(),
+          },
+        ];
+        defaults.forEach((nb) => addNotebook(nb));
+      }
+
+      vortexMacroScheduler.initialize();
+
+      if (state.orbEnabled && VortexBridge?.startFloatingOrb) {
+        try {
+          await VortexBridge.startFloatingOrb(state.orbOpacity, state.orbAccentKey);
+        } catch (_e) {
         }
+      }
 
-        // 4. Flush PC Sync Queue ONLY if user explicitly enabled PC Sync (Standby by default)
-        await vortexPcBridge.flushQueueIfOnline();
-      } catch (e) {
-        console.warn('VORTEX Boot Warning:', e);
+      if (state.wakewordEnabled) {
+        try {
+          await vortexVoiceWakeword.startContinuousWakeword();
+        } catch (_e) {
+        }
       }
     };
 
-    bootVortexCore();
+    void bootstrapVortex();
 
-    // A. Self-Learning App-Lock Vault Auto-Unlocker
-    const pkgSub = DeviceEventEmitter.addListener(
-      'VortexPackageChanged',
-      async (pkgName: string) => {
-        if (!pkgName) return;
-        const now = Date.now();
-        if (pkgName === lastUnlockedPkg && now - lastUnlockTs < 4500) return;
-
-        try {
-          const rule = await getAppLockRule(pkgName);
-          if (rule && rule.autoUnlockEnabled && rule.secretData) {
-            lastUnlockedPkg = pkgName;
-            lastUnlockTs = now;
-            setTimeout(() => {
-              if (rule.lockType === 'PIN') {
-                VortexBridge?.replayPinNodes?.(rule.secretData);
-              } else if (rule.lockType === 'PATTERN') {
-                VortexBridge?.drawPatternGesture?.(rule.secretData);
-              }
-            }, 380);
-          }
-        } catch {}
+    const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        void refreshNativeDiagnostics();
       }
-    );
-
-    // B. Smart Clipboard Error & Code Interceptor
-    const clipSub = DeviceEventEmitter.addListener(
-      'VortexClipboardChanged',
-      async (clipText: string) => {
-        if (!clipText) return;
-        const looksLikeErrorOrCode =
-          /(error|exception|failed|syntax|undefined|nullpointer|traceback|segfault|#include|def |class |public static)/i.test(
-            clipText
-          );
-        if (looksLikeErrorOrCode) {
-          await VortexBridge?.updateFloatingHud?.(
-            'VORTEX CLIPBOARD RADAR',
-            `Code/Error copied (${clipText.slice(0, 75)}...). Tap SCAN to solve or fix.`,
-            false
-          );
-        }
-      }
-    );
-
-    // C. Incoming WhatsApp / Replyable Message HUD Summary
-    const msgSub = DeviceEventEmitter.addListener(
-      'VortexIncomingMessage',
-      async (rawJson: string) => {
-        try {
-          const msg = JSON.parse(rawJson);
-          if (msg?.title && msg?.text) {
-            await VortexBridge?.updateFloatingHud?.(
-              `MSG • ${String(msg.title).slice(0, 26)}`,
-              `${String(msg.text).slice(0, 110)}\n(Say: "Reply to ${msg.title} saying ...")`,
-              false
-            );
-          }
-        } catch {}
-      }
-    );
-
-    // D. Hardware Event Macros (Auto Turbo RAM Sweep on Charger Connect)
-    const hwSub = DeviceEventEmitter.addListener(
-      'VortexHardwareEvent',
-      async (eventCode: string) => {
-        if (eventCode === 'CHARGER_CONNECTED') {
-          const freedMb = (await VortexBridge?.sweepJunkCache?.()) ?? 0;
-          await VortexBridge?.updateFloatingHud?.(
-            'CHARGER MACRO • TURBO BOOST',
-            `Power connected — cleaned cache & reclaimed ${freedMb} MB RAM.`,
-            false
-          );
-        }
-      }
-    );
+    });
 
     return () => {
-      mounted = false;
-      pkgSub.remove();
-      clipSub.remove();
-      msgSub.remove();
-      hwSub.remove();
+      sub.remove();
+      vortexMacroScheduler.destroy();
     };
-  }, []);
+  }, [addNotebook, hydrateStore, refreshNativeDiagnostics]);
+
+  const renderActiveScreen = () => {
+    switch (activeScreen) {
+      case 'system_telemetry':
+        return <VortexSystemTelemetryScreen />;
+      case 'web_inspector':
+        return <VortexWebInspectorScreen />;
+      case 'orb_studio':
+        return <VortexOrbStudioScreen />;
+      case 'ghost_loop':
+        return <VortexGhostLoopScreen />;
+      case 'macros_workflows':
+        return <VortexMacrosAndWorkflowsScreen />;
+      case 'image_studio':
+        return <VortexImageStudioScreen />;
+      case 'study_notebooks':
+        return <VortexStudyNotebooksScreen />;
+      case 'local_ai':
+        return <VortexLocalAiWakewordScreen />;
+      case 'code_canvas':
+        return <VortexCodeCanvasScreen />;
+      case 'settings_vault':
+        return <VortexSettingsVaultScreen />;
+      case 'chat':
+      default:
+        return <VortexChatScreen />;
+    }
+  };
 
   return (
-    <VortexBootBoundary>
-      <View style={styles.appRoot}>
-        <VortexGlassCockpit />
+    <SafeAreaProvider>
+      <View style={styles.rootContainer}>
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor={VORTEX_PALETTE.oledBlack}
+          translucent={false}
+        />
+        {renderActiveScreen()}
       </View>
-    </VortexBootBoundary>
+    </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  appRoot: {
+  rootContainer: {
     flex: 1,
-    backgroundColor: '#000000',
-  },
-  fallbackRoot: {
-    flex: 1,
-    backgroundColor: '#000000',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  fallbackTitle: {
-    color: '#38BDF8',
-    fontSize: 22,
-    fontWeight: '800',
-    marginBottom: 10,
-  },
-  fallbackBody: {
-    color: '#CBD5E1',
-    fontSize: 15,
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  fallbackBtn: {
-    backgroundColor: '#2563EB',
-    paddingHorizontal: 22,
-    paddingVertical: 12,
-    borderRadius: 14,
-  },
-  fallbackBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-    fontSize: 14,
+    backgroundColor: VORTEX_PALETTE.oledBlack,
   },
 });
