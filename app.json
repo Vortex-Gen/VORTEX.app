@@ -1,47 +1,63 @@
 {
   "expo": {
-    "name": "Vortex ẞ",
-    "slug": "vortex-beta",
-    "version": "2.0.0",
+    "name": "VORTEX",
+    "slug": "vortex-app",
+    "version": "4.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",
-    "backgroundColor": "#05070B",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": false,
     "splash": {
-      "image": "./assets/icon.png",
+      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#05070B"
+      "backgroundColor": "#000000"
     },
     "android": {
       "package": "com.vortex.app",
       "versionCode": 4,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
       "permissions": [
-        "android.permission.CALL_PHONE",
-        "android.permission.SEND_SMS",
-        "android.permission.READ_CONTACTS",
-        "android.permission.WRITE_SETTINGS",
-        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
         "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.USE_EXACT_ALARM",
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
-        "android.permission.QUERY_ALL_PACKAGES",
-        "android.permission.CAMERA",
-        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.WAKE_LOCK",
         "android.permission.VIBRATE",
-        "android.permission.INTERNET",
-        "android.permission.ACCESS_NETWORK_STATE"
+        "android.permission.CAMERA",
+        "android.permission.CALL_PHONE",
+        "android.permission.SEND_SMS",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.QUERY_ALL_PACKAGES"
       ]
     },
     "plugins": [
+      "expo-font",
       "expo-sqlite",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow VORTEX to capture hands-free voice commands."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow VORTEX to inspect gallery images.",
+          "cameraPermission": "Allow VORTEX Vision to capture camera photos."
+        }
+      ],
       "./plugins/withVortexNative"
     ]
   }
