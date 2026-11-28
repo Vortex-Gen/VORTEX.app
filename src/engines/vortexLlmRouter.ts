@@ -43,7 +43,7 @@ export interface LlmGenerateOutput {
 const GEMINI_MODEL_CASCADE = ['gemini-2.5-flash', 'gemini-2.0-flash'];
 
 const DEFAULT_GGUF_DIRS = [
-  'file:///storage/emulated/0/Vortex/model/',
+  'file:///storage/emulated/0/Vortex/models/',
   `${FileSystem.documentDirectory ?? ''}models/`,
 ];
 
