@@ -169,7 +169,7 @@ export default function App() {
     }
   };
 
-  if (!fontsLoaded || !hydrated) {
+  if (!fontsReady || !hydrated) {
     return (
       <View style={styles.bootContainer}>
         <StatusBar style="light" backgroundColor={VORTEX_PALETTE.oledBlack} />
