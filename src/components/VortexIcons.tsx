@@ -670,3 +670,43 @@ export const VortexIcon: React.FC<VortexIconProps> = ({
       );
   }
 };
+type NamedIconProps = {
+  size?: number;
+  color?: string;
+};
+
+export const CheckIcon = ({ size = 16, color = '#F8FAFC' }: NamedIconProps) => (
+  <VortexIcon name="check" size={size} color={color} />
+);
+
+export const CodeBracketsIcon = ({ size = 16, color = '#F8FAFC' }: NamedIconProps) => (
+  <VortexIcon name="code" size={size} color={color} />
+);
+
+export const CopyIcon = ({ size = 16, color = '#F8FAFC' }: NamedIconProps) => (
+  <VortexIcon name="copy" size={size} color={color} />
+);
+
+export const DownloadIcon = ({ size = 16, color = '#F8FAFC' }: NamedIconProps) => (
+  <VortexIcon name="download" size={size} color={color} />
+);
+
+export const ExpandIcon = ({ size = 16, color = '#F8FAFC' }: NamedIconProps) => (
+  <VortexIcon name="expand" size={size} color={color} />
+);
+
+export const ExternalLinkIcon = ({ size = 16, color = '#F8FAFC' }: NamedIconProps) => (
+  <VortexIcon name="external_link" size={size} color={color} />
+);
+
+export const GhostHandIcon = ({ size = 16, color = '#F8FAFC' }: NamedIconProps) => (
+  <VortexIcon name="ghost" size={size} color={color} />
+);
+
+export const InjectBoltIcon = ({ size = 16, color = '#F8FAFC' }: NamedIconProps) => (
+  <VortexIcon name="inject" size={size} color={color} />
+);
+
+export const SparklesIcon = ({ size = 16, color = '#F8FAFC' }: NamedIconProps) => (
+  <VortexIcon name="sparkles" size={size} color={color} />
+); 
