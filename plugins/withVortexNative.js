@@ -83,7 +83,16 @@ const withVortexManifest = (config) => {
         'android:exported': 'false',
         'android:foregroundServiceType': 'specialUse|microphone',
       },
+      property: [
+        {
+          $: {
+            'android:name': 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE',
+            'android:value': 'Autonomous floating assistant overlay and accessibility control',
+          },
+        },
+      ],
     });
+
 
     upsertByName(services, {
       $: {
