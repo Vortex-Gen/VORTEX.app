@@ -30,9 +30,20 @@ const withVortexManifest = (config) => {
     const manifest = cfg.modResults.manifest;
     const app = manifest.application[0];
 
+    if (!manifest.$['xmlns:tools']) {
+      manifest.$['xmlns:tools'] = 'http://schemas.android.com/tools';
+    }
+
+    const existingReplace = app.$['tools:replace']
+      ? app.$['tools:replace'].split(',').map((s) => s.trim())
+      : [];
+    if (!existingReplace.includes('android:appComponentFactory')) {
+      existingReplace.push('android:appComponentFactory');
+    }
+    app.$['tools:replace'] = existingReplace.join(',');
+
     app.$['android:requestLegacyExternalStorage'] = 'true';
     app.$['android:usesCleartextTraffic'] = 'true';
-
     const queries = ensureArray(manifest, 'queries');
     const hasMainQuery = queries.some(
       (q) =>
@@ -299,21 +310,20 @@ module.exports = function withVortexNative(config) {
   config = withVortexGradle(config);
   config = withVortexMainApp(config);
   config = withVortexFiles(config);
-  config = withGradleProperties(config, (modConfig) => {
+    config = withGradleProperties(config, (modConfig) => {
     const props = modConfig.modResults;
-    const idx = props.findIndex(
-      (item) => item.type === 'property' && item.key === 'reactNativeArchitectures'
-    );
-    const archProp = {
-      type: 'property',
-      key: 'reactNativeArchitectures',
-      value: 'arm64-v8a',
+    const setProp = (key, value) => {
+      const idx = props.findIndex((item) => item.type === 'property' && item.key === key);
+      const entry = { type: 'property', key, value };
+      if (idx >= 0) {
+        props[idx] = entry;
+      } else {
+        props.push(entry);
+      }
     };
-    if (idx >= 0) {
-      props[idx] = archProp;
-    } else {
-      props.push(archProp);
-    }
+    setProp('reactNativeArchitectures', 'arm64-v8a');
+    setProp('android.useAndroidX', 'true');
+    setProp('android.enableJetifier', 'true');
     return modConfig;
   });
   return config;
