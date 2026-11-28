@@ -3,6 +3,7 @@ const {
   withAppBuildGradle,
   withMainApplication,
   withDangerousMod,
+  withGradleProperties,
 } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
@@ -298,5 +299,22 @@ module.exports = function withVortexNative(config) {
   config = withVortexGradle(config);
   config = withVortexMainApp(config);
   config = withVortexFiles(config);
+  config = withGradleProperties(config, (modConfig) => {
+    const props = modConfig.modResults;
+    const idx = props.findIndex(
+      (item) => item.type === 'property' && item.key === 'reactNativeArchitectures'
+    );
+    const archProp = {
+      type: 'property',
+      key: 'reactNativeArchitectures',
+      value: 'arm64-v8a',
+    };
+    if (idx >= 0) {
+      props[idx] = archProp;
+    } else {
+      props.push(archProp);
+    }
+    return modConfig;
+  });
   return config;
 };
