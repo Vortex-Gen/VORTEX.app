@@ -97,17 +97,25 @@ class VortexWebAndPcBridge {
     const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${dims.width}&height=${dims.height}&model=${model}&seed=${seed}&nologo=true&enhance=false`;
 
     const localUri = `${FileSystem.cacheDirectory}vortex_art_${seed}.jpg`;
-    const download = await FileSystem.downloadAsync(imageUrl, localUri);
+    let resolvedUri = imageUrl;
+    try {
+      const download = await FileSystem.downloadAsync(imageUrl, localUri);
+      if (download.status === 200 && download.uri) {
+        resolvedUri = download.uri;
+      }
+    } catch (_e) {
+    }
 
     return {
       imageUrl,
-      localUri: download.uri || imageUrl,
+      localUri: resolvedUri,
       enhancedPrompt: finalPrompt,
       width: dims.width,
       height: dims.height,
       seed,
       model,
     };
+
   }
 
   public async fetchAndInspectWebUrl(rawUrl: string): Promise<WebPageInspectionResult> {
